@@ -1,0 +1,72 @@
+*{
+    box-sizing:border-box;
+}
+
+body{
+    text-align:center;
+    background-color:#08111F;
+}
+
+h1{
+    color:#F3C45D;
+    background-color:#111D31;
+    padding:20px;
+}
+
+main{
+    background-color:#17263B;
+    padding:20px;
+}
+
+h2{
+    color:#DCE8F5;  
+}
+
+label{
+    color:#F5F7FB;
+}
+
+input {
+    background-color: #0D1929;
+    color: #F5F7FB;
+    border: 2px solid #304863;
+    inline-size:100px;
+    block-size:30px;
+}
+
+input:focus{
+    border:2px #F3C45D solid;
+}
+
+select {
+    background-color: #0D1929;
+    color: #F5F7FB;
+    border: 3px solid #304863;
+    inline-size:100px;
+    block-size:30px;
+}
+
+#app_selector{
+    inline-size:140px;
+    margin:30px;
+}
+
+#start_time{
+    margin:20px; 
+}
+
+#end_time{
+    margin:20px;
+}
+
+button{
+    inline-size:100px;
+    block-size:30px;
+    margin-block-start:20px;
+    background-color:#F3C45D;
+    color:#08111F;
+}
+
+button:hover{
+    color:#FFE39A;
+}

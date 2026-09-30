@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>App Blocker</title>
+        <link href="style.css" rel="stylesheet">
+        <script src="script.js" defer></script>
+    </head>
+    <body>
+        <header>
+            <h1>APP BLOCKER</h1>
+        </header>
+        <main>
+            <section>
+                <h2>SELECT AN APPLICATION THAT YOU WANT TO BE BLOCKED</h2>
+                <label>Select an app
+                    <select id="app_selector"></select>
+                </label>
+            </section>
+            <section id="start_time">
+                <label>TYPE START TIME:</label>
+                <input id="start_hour" type="number" min="1" max="12" placeholder="Hour"><strong>:</strong>
+                <input id="start_minutes" type="number" min="0" max="59" placeholder="Minutes">
+                <select id="start_ampm">
+                    <option>A.M.</option>
+                    <option>P.M.</option>
+                </select>
+            </section>
+            <section id="end_time">
+                <label>TYPE END TIME:</label>
+                <input id="end_hour" type="number" min="1" max="12" placeholder="Hour"><strong>:</strong>
+                <input id="end_minutes" type="number" min="0" max="59" placeholder="Minutes">
+                <select id="end_ampm">
+                    <option>A.M.</option>
+                    <option>P.M.</option>
+                </select>
+            </section>
+            <section>
+                <button id="block_button">BLOCK APP</button>
+            </section>
+        </main>
+    </body>
+</html>
