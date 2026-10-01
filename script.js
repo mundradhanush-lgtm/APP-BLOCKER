@@ -1,9 +1,17 @@
 const app_selector=document.querySelector("#app_selector");
-const app_list=["YouTue", "WhatsApp", "App Store", "Safari", "Slack"];
-app_list.forEach((event)=>{
-    const option=document.createElement("option");
-    option.textContent=event;
-    app_selector.append(option);
+window.electronAPI.receiveApps((app_list) => {
+    app_list.forEach((event) => {
+        const option = document.createElement("option");
+
+        if (Array.isArray(event)) {
+            option.textContent = event[0] + " | " + event[1];
+        }
+        else {
+            option.textContent = event;
+        }
+
+        app_selector.append(option);
+    });
 });
 
 const start_hour=document.querySelector("#start_hour");
@@ -123,6 +131,6 @@ block_button.addEventListener("click", (event)=>{
             "start":start_time,
             "end":end_time
         };
-        console.log(main_obj);
+        window.electronAPI.sendAppData(main_obj);
     }
 })
