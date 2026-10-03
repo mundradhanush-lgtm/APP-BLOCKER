@@ -1,72 +1,163 @@
-*{
-    box-sizing:border-box;
+* {
+    box-sizing: border-box;
 }
 
-body{
-    text-align:center;
-    background-color:#08111F;
-}
-
-h1{
-    color:#F3C45D;
-    background-color:#111D31;
-    padding:20px;
-}
-
-main{
-    background-color:#17263B;
-    padding:20px;
-}
-
-h2{
-    color:#DCE8F5;  
-}
-
-label{
-    color:#F5F7FB;
-}
-
-input {
-    background-color: #0D1929;
+body {
+    margin: 0;
+    min-height: 100vh;
+    background-color: #08111F;
     color: #F5F7FB;
-    border: 2px solid #304863;
-    inline-size:100px;
-    block-size:30px;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+        "SF Pro Text", Arial, sans-serif;
 }
 
-input:focus{
-    border:2px #F3C45D solid;
+header {
+    background-color: #111D31;
+    padding: 1.5rem 1.25rem;
+    border-bottom: 1px solid #304863;
 }
 
+h1 {
+    text-align:center;
+    color: #F3C45D;
+    font-size: 1.875rem;
+    letter-spacing: 0.0625rem;
+}
+
+main {
+    width: min(700px, 90%);
+    margin: 2.5rem auto;
+    padding: 2rem;
+    background-color: #17263B;
+    border: 1px solid #304863;
+    border-radius: 1rem;
+}
+
+section {
+    margin-bottom: 1.75rem;
+}
+
+section:last-child {
+    margin-bottom: 0;
+}
+
+h2 {
+    margin-top: 0;
+    margin-bottom: 1.25rem;
+    color: #F5F7FB;
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+label {
+    color: #F5F7FB;
+    font-size: 0.9375rem;
+}
+
+#app_selector {
+    display: block;
+    width: 100%;
+    height: 2.625rem;
+    margin: 0.75rem 0 0;
+}
+
+#start_time,
+#end_time {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    margin: 0 0 1.25rem;
+}
+
+#start_time label,
+#end_time label {
+    width: 8.125rem;
+}
+
+input,
 select {
     background-color: #0D1929;
     color: #F5F7FB;
-    border: 3px solid #304863;
-    inline-size:100px;
-    block-size:30px;
+    border: 1px solid #304863;
+    border-radius: 0.5rem;
+    height: 2.625rem;
+    font-size: 0.9375rem;
+    padding: 0 0.625rem;
+    outline: none;
 }
 
-#app_selector{
-    inline-size:140px;
-    margin:30px;
+input {
+    width: 5.625rem;
 }
 
-#start_time{
-    margin:20px; 
+select {
+    width: 6.875rem;
 }
 
-#end_time{
-    margin:20px;
+input:focus,
+select:focus {
+    border-color: #F3C45D;
 }
 
-button{
-    inline-size:100px;
-    block-size:30px;
-    margin-block-start:20px;
-    background-color:#F3C45D;
-    color:#08111F;
+input::placeholder {
+    color: #AEBBCB;
 }
 
-button:hover{
-    color:#FFE39A;
+strong {
+    color: #AEBBCB;
+    font-size: 1.125rem;
+}
+
+button {
+    width: 100%;
+    height: 2.875rem;
+    margin-top: 0.3125rem;
+    border: none;
+    border-radius: 0.5625rem;
+    background-color: #F3C45D;
+    color: #08111F;
+    font-size: 0.9375rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+button:hover {
+    background-color: #FFE39A;
+}
+
+button:active {
+    transform: scale(0.98);
+}
+
+button:focus-visible {
+    outline: 2px solid #FFE39A;
+    outline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+    main {
+        width: 94%;
+        padding: 1.5rem;
+        margin: 1.5625rem auto;
+    }
+
+    #start_time,
+    #end_time {
+        flex-wrap: wrap;
+    }
+
+    #start_time label,
+    #end_time label {
+        width: 100%;
+        margin-bottom: 0.25rem;
+    }
+
+    input {
+        width: 5rem;
+    }
+
+    select {
+        width: 6.25rem;
+    }
 }
