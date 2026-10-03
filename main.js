@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const { spawn } = require("child_process");
 
+let blocker_process = null;
+
 function createWindow() {
     const window = new BrowserWindow({
         width: 900,
@@ -52,6 +54,19 @@ app.whenReady().then(() => {
 });
 
 ipcMain.on("block-app", (event, data) => {
+
+    // ---------------------------------------------------------
+    // PREVENT MULTIPLE BLOCKER PROCESSES
+    // ---------------------------------------------------------
+
+    if (blocker_process && !blocker_process.killed) {
+        event.sender.send(
+            "blocker-error",
+            "A blocking schedule is already active."
+        );
+        return;
+    }
+
     if (!data || typeof data !== "object") {
         console.error("Invalid data received from the GUI.");
         return;
@@ -64,10 +79,22 @@ ipcMain.on("block-app", (event, data) => {
 
     const python = spawn("python3", ["app_blocker.py"]);
 
+    blocker_process = python;
+
+    let blocking_started = false;
+
     python.stdout.on("data", (output) => {
         const message = output.toString().trim();
 
         if (message) {
+
+            if (
+                message.includes("THE APP IS CLOSED") ||
+                message.includes("THIS APP IS ALREADY RUNNING")
+            ) {
+                blocking_started = true;
+            }
+
             event.sender.send("blocker-status", message);
         }
 
@@ -90,16 +117,28 @@ ipcMain.on("block-app", (event, data) => {
 
     python.on("error", (error) => {
         console.error(`Could not start Python: ${error}`);
-        event.sender.send("blocker-error", "Could not start the application blocker.");
+
+        event.sender.send(
+            "blocker-error",
+            "Could not start the application blocker."
+        );
+
+        blocker_process = null;
     });
 
     python.on("close", (code) => {
-        if (code === 0) {
-            event.sender.send("blocker-ended", "The blocking period has ended.");
+
+        if (code === 0 && blocking_started) {
+            event.sender.send(
+                "blocker-ended",
+                "The blocking period has ended."
+            );
         }
-        else {
+        else if (code !== 0) {
             console.error(`Python blocker failed with exit code: ${code}`);
         }
+
+        blocker_process = null;
     });
 
     try {
@@ -108,6 +147,10 @@ ipcMain.on("block-app", (event, data) => {
     }
     catch (error) {
         console.error("Could not send data to Python:", error);
-        event.sender.send("blocker-error", "Could not send the blocking information to Python.");
+
+        event.sender.send(
+            "blocker-error",
+            "Could not send the blocking information to Python."
+        );
     }
 });
