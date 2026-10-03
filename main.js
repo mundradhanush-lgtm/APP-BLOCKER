@@ -50,6 +50,7 @@ app.whenReady().then(() => {
     createWindow();
     getApps();
 });
+
 ipcMain.on("block-app", (event, data) => {
     if (!data || typeof data !== "object") {
         console.error("Invalid data received from the GUI.");
@@ -63,24 +64,40 @@ ipcMain.on("block-app", (event, data) => {
 
     const python = spawn("python3", ["app_blocker.py"]);
 
-    python.stdin.on("error", (error) => {
-        console.error(`Python input error: ${error}`);
-    });
-
     python.stdout.on("data", (output) => {
+        const message = output.toString().trim();
+
+        if (message) {
+            event.sender.send("blocker-status", message);
+        }
+
         console.log(`Python: ${output}`);
     });
 
     python.stderr.on("data", (error) => {
+        const message = error.toString().trim();
+
+        if (message) {
+            event.sender.send("blocker-error", message);
+        }
+
         console.error(`Python Error: ${error}`);
+    });
+
+    python.stdin.on("error", (error) => {
+        console.error(`Python input error: ${error}`);
     });
 
     python.on("error", (error) => {
         console.error(`Could not start Python: ${error}`);
+        event.sender.send("blocker-error", "Could not start the application blocker.");
     });
 
     python.on("close", (code) => {
-        if (code !== 0) {
+        if (code === 0) {
+            event.sender.send("blocker-ended", "The blocking period has ended.");
+        }
+        else {
             console.error(`Python blocker failed with exit code: ${code}`);
         }
     });
@@ -91,5 +108,6 @@ ipcMain.on("block-app", (event, data) => {
     }
     catch (error) {
         console.error("Could not send data to Python:", error);
+        event.sender.send("blocker-error", "Could not send the blocking information to Python.");
     }
 });
