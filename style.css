@@ -135,6 +135,25 @@ button:focus-visible {
     outline-offset: 3px;
 }
 
+#status_section {
+    margin-top: 2rem;
+    padding: 1rem;
+    background-color: #0D1929;
+    border: 1px solid #304863;
+    border-radius: 0.75rem;
+}
+
+#status_section h2 {
+    margin-bottom: 0.625rem;
+    font-size: 1rem;
+}
+
+#status_message {
+    margin: 0;
+    color: #AEBBCB;
+    font-size: 0.9375rem;
+}
+
 @media (max-width: 600px) {
     main {
         width: 94%;

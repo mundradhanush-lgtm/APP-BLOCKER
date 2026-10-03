@@ -1,4 +1,6 @@
 const app_selector=document.querySelector("#app_selector");
+const status_message=document.querySelector("#status_message");
+
 window.electronAPI.receiveApps((app_list) => {
     app_list.forEach((event) => {
         const option = document.createElement("option");
@@ -12,6 +14,13 @@ window.electronAPI.receiveApps((app_list) => {
 
         app_selector.append(option);
     });
+
+    if(app_list.length>0){
+        status_message.textContent="Applications loaded. Select an app and set a schedule.";
+    }
+    else{
+        status_message.textContent="No applications were found.";
+    }
 });
 
 const start_hour=document.querySelector("#start_hour");
@@ -74,46 +83,56 @@ end_minutes.addEventListener("input", (event)=>{
 });
 
 const block_button=document.querySelector("#block_button");
+
 block_button.addEventListener("click", (event)=>{
     if(start_hour.value!="" && start_minutes.value!="" && start_ampm.value!="" && end_hour.value!="" && end_minutes.value!="" && end_ampm.value!=""){
         let sh=Number(start_hour.value);
         let sm=Number(start_minutes.value);
         let eh=Number(end_hour.value);
         let em=Number(end_minutes.value);
+
         if(start_ampm.value==="A.M." && sh===12){
             sh=0;
         }
+
         if(start_ampm.value==="P.M." && sh!=12){
             sh=sh+12;
         }
+
         if(end_ampm.value==="A.M." && eh===12){
             eh=0;
         }
+
         if(end_ampm.value==="P.M." && eh!=12){
             eh=eh+12;
         }
+
         let start_h;
         let start_m;
         let end_h;
         let end_m;
+
         if(sh<10){
             start_h="0"+sh;
         }
         else{
             start_h=sh;
         }
+
         if(sm<10){
             start_m="0"+sm;
         }
         else{
             start_m=sm;
         }
+
         if(eh<10){
             end_h="0"+eh;
         }
         else{
             end_h=eh;
         }
+
         if(em<10){
             end_m="0"+em;
         }
@@ -131,6 +150,12 @@ block_button.addEventListener("click", (event)=>{
             "start":start_time,
             "end":end_time
         };
+
+        status_message.textContent="Blocking schedule sent. The application will be blocked during the selected time.";
+
         window.electronAPI.sendAppData(main_obj);
+    }
+    else{
+        status_message.textContent="Please complete the application and time fields before blocking.";
     }
 })
