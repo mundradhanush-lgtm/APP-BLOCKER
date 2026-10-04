@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
     <head>
+        <meta charset="UTF-8">
         <title>App Blocker</title>
         <link href="style.css" rel="stylesheet">
         <script src="script.js" defer></script>
@@ -10,36 +11,105 @@
             <h1>APP BLOCKER</h1>
         </header>
         <main>
-            <section>
-                <h2>SELECT AN APPLICATION THAT YOU WANT TO BE BLOCKED</h2>
-                <label>Select an app
-                    <select id="app_selector"></select>
-                </label>
+            <section id="home_view">
+                <section>
+                    <h2>YOUR SCHEDULES</h2>
+                    <div id="schedule_list">
+                        <p id="no_schedules_message">
+                            No schedules have been created yet.
+                        </p>
+                    </div>
+                </section>
+                <section>
+                    <button id="add_schedule_button">
+                        + ADD AN APP TO BLOCK
+                    </button>
+                </section>
+                <section id="status_section">
+                    <h2>STATUS</h2>
+                    <p id="status_message">
+                        Ready. No blocking schedules are active.
+                    </p>
+                </section>
             </section>
-            <section id="start_time">
-                <label>TYPE START TIME:</label>
-                <input id="start_hour" type="number" min="1" max="12" placeholder="Hour"><strong>:</strong>
-                <input id="start_minutes" type="number" min="0" max="59" placeholder="Minutes">
-                <select id="start_ampm">
-                    <option>A.M.</option>
-                    <option>P.M.</option>
-                </select>
-            </section>
-            <section id="end_time">
-                <label>TYPE END TIME:</label>
-                <input id="end_hour" type="number" min="1" max="12" placeholder="Hour"><strong>:</strong>
-                <input id="end_minutes" type="number" min="0" max="59" placeholder="Minutes">
-                <select id="end_ampm">
-                    <option>A.M.</option>
-                    <option>P.M.</option>
-                </select>
-            </section>
-            <section>
-                <button id="block_button">BLOCK APP</button>
-            </section>
-            <section id="status_section">
-                <h2>STATUS</h2>
-                <p id="status_message">Ready. Select an application and set a schedule.</p>
+            <section id="add_schedule_view" hidden>
+                <section>
+                    <h2>ADD A SCHEDULE</h2>
+                </section>
+                <section>
+                    <label>
+                        SELECT AN APPLICATION
+                    </label>
+                    <select id="app_selector">
+                    </select>
+                </section>
+                <section id="start_time">
+                    <label>START TIME:</label>
+                    <input id="start_hour" type="number" min="1" max="12" placeholder="Hour">
+                    <strong>:</strong>
+                    <input id="start_minutes" type="number" min="0" max="59" placeholder="Minutes">
+                    <select id="start_ampm">
+                        <option>A.M.</option>
+                        <option>P.M.</option>
+                    </select>
+                </section>
+                <section id="end_time">
+                    <label>END TIME:</label>
+                    <input id="end_hour" type="number" min="1" max="12" placeholder="Hour">
+                    <strong>:</strong>
+                    <input id="end_minutes" type="number" min="0" max="59" placeholder="Minutes">
+                    <select id="end_ampm">
+                        <option>A.M.</option>
+                        <option>P.M.</option>
+                    </select>
+                </section>
+                <section id="specific_date_section" hidden>
+                    <h2>SELECT DATE</h2>
+                    <input id="specific_day" type="number" min="1" max="31" placeholder="DD">
+                    <strong>/</strong>
+                    <input id="specific_month" type="number" min="1" max="12" placeholder="MM">
+                    <strong>/</strong>
+                    <input id="specific_year" type="number" min="2026" placeholder="YYYY">
+                </section>
+                <section>
+                    <label>
+                        SCHEDULE TYPE
+                    </label>
+                    <select id="schedule_type">
+                        <option value="today">Today only</option>
+                        <option value="specific_date">Specific Date</option>
+                        <option value="every_day">Every day</option>
+                        <option value="selected_days">Specific days</option>
+                    </select>
+                </section>
+                <section id="selected_days_section" hidden>
+                    <h2>SELECT DAYS</h2>
+                    <label>
+                        <input type="checkbox" value="Monday">Monday
+                    </label>
+                    <label>
+                        <input type="checkbox" value="Tuesday">Tuesday
+                    </label>
+                    <label>
+                        <input type="checkbox" value="Wednesday">Wednesday
+                    </label>
+                    <label>
+                        <input type="checkbox" value="Thursday">Thursday
+                    </label>
+                    <label>
+                        <input type="checkbox" value="Friday">Friday
+                    </label>
+                    <label>
+                        <input type="checkbox" value="Saturday">Saturday
+                    </label>
+                    <label>
+                        <input type="checkbox" value="Sunday">Sunday
+                    </label>
+                </section>
+                <section>
+                    <button id="save_schedule_button">SAVE SCHEDULE</button>
+                    <button id="cancel_schedule_button">CANCEL</button>
+                </section>
             </section>
         </main>
     </body>
