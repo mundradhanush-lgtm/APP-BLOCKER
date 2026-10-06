@@ -5,6 +5,7 @@ import sys
 import json
 import os
 import time
+import platform
 
 dictionary={}
 main_list=[]
@@ -12,8 +13,12 @@ new_list_for_i=[]
 processed=[]
 final_list=[]
 
+operating_system=platform.system()
+
+
 def format_date(date):
     return date.strftime("%d/%m/%Y")
+
 
 def get_date_from_string(date_string):
     try:
@@ -21,8 +26,10 @@ def get_date_from_string(date_string):
     except (TypeError,ValueError):
         return None
 
+
 def get_weekday_name(date):
     return date.strftime("%A")
+
 
 def schedule_starts_on_date(schedule,date):
     if(schedule.get("enabled",True) is False):
@@ -44,6 +51,7 @@ def schedule_starts_on_date(schedule,date):
 
     return False
 
+
 def schedule_is_active(schedule,now):
     if(schedule.get("enabled",True) is False):
         return False
@@ -62,7 +70,12 @@ def schedule_is_active(schedule,now):
 
     previous_date=current_date-timedelta(days=1)
 
-    return schedule_starts_on_date(schedule,current_date) and current>=start or schedule_starts_on_date(schedule,previous_date) and current<end
+    return (
+        (schedule_starts_on_date(schedule,current_date) and current>=start)
+        or
+        (schedule_starts_on_date(schedule,previous_date) and current<end)
+    )
+
 
 def validate_schedule(schedule):
     if(not isinstance(schedule,dict)):
@@ -100,7 +113,12 @@ def validate_schedule(schedule):
 
     return True
 
-def get_process_path(selected_app):
+
+# ============================================================
+# MACOS
+# ============================================================
+
+def get_process_path_macos(selected_app):
     duplicate_app_name=selected_app
     parent_folder=None
 
@@ -114,18 +132,27 @@ def get_process_path(selected_app):
             text=True
         )
     except OSError as error:
-        print(f"ERROR: Could not start application search: {error}",file=sys.stderr)
+        print(
+            f"ERROR: Could not start application search: {error}",
+            file=sys.stderr
+        )
         return None
 
     if(app_search.returncode!=0):
-        print(f"ERROR: Could not search for the application {selected_app}.",file=sys.stderr)
+        print(
+            f"ERROR: Could not search for the application {selected_app}.",
+            file=sys.stderr
+        )
         return None
 
     paths=app_search.stdout.splitlines()
 
     if(parent_folder):
         for check in paths:
-            if(f"/{parent_folder}/" in check and check.endswith(f"/{duplicate_app_name}.app")):
+            if(
+                f"/{parent_folder}/" in check
+                and check.endswith(f"/{duplicate_app_name}.app")
+            ):
                 return check
     else:
         if(len(paths)==1):
@@ -137,7 +164,8 @@ def get_process_path(selected_app):
 
     return None
 
-def terminate_running_processes(app_path):
+
+def terminate_running_processes_macos(app_path):
     try:
         pid=subprocess.run(
             ["pgrep","-f",f"{app_path}/Contents/MacOS/"],
@@ -145,11 +173,17 @@ def terminate_running_processes(app_path):
             text=True
         )
     except OSError as error:
-        print(f"ERROR: Could not start process check: {error}",file=sys.stderr)
+        print(
+            f"ERROR: Could not start process check: {error}",
+            file=sys.stderr
+        )
         return
 
     if(pid.returncode not in (0,1)):
-        print("ERROR: Could not check whether the application is running.",file=sys.stderr)
+        print(
+            "ERROR: Could not check whether the application is running.",
+            file=sys.stderr
+        )
         return
 
     final_pids=pid.stdout.splitlines()
@@ -158,11 +192,11 @@ def terminate_running_processes(app_path):
         try:
             final_pid=int(final_pid)
             process=psutil.Process(final_pid)
+
             process.terminate()
 
             try:
                 process.wait(timeout=2)
-
             except psutil.TimeoutExpired:
                 print(
                     f"ERROR: PID {final_pid} did not terminate within the expected time.",
@@ -172,17 +206,14 @@ def terminate_running_processes(app_path):
                 try:
                     process.kill()
                     process.wait(timeout=2)
-
                 except psutil.NoSuchProcess:
                     continue
-
                 except psutil.AccessDenied:
                     print(
                         f"ERROR: Permission denied while forcing PID {final_pid} to terminate.",
                         file=sys.stderr
                     )
                     continue
-
                 except psutil.Error as error:
                     print(
                         f"ERROR: Could not force PID {final_pid} to terminate: {error}",
@@ -192,23 +223,329 @@ def terminate_running_processes(app_path):
 
         except ValueError:
             continue
-
         except psutil.NoSuchProcess:
             continue
-
         except psutil.AccessDenied:
             print(
                 f"ERROR: Permission denied while trying to terminate PID {final_pid}.",
                 file=sys.stderr
             )
             continue
-
         except psutil.Error as error:
             print(
                 f"ERROR: Could not terminate PID {final_pid}: {error}",
                 file=sys.stderr
             )
             continue
+
+
+# ============================================================
+# WINDOWS
+# ============================================================
+
+def get_windows_start_menu_directories():
+    directories=[]
+
+    user_start_menu=os.path.join(
+        os.environ.get("APPDATA",""),
+        "Microsoft",
+        "Windows",
+        "Start Menu",
+        "Programs"
+    )
+
+    common_start_menu=os.path.join(
+        os.environ.get("PROGRAMDATA",""),
+        "Microsoft",
+        "Windows",
+        "Start Menu",
+        "Programs"
+    )
+
+    if(os.path.isdir(user_start_menu)):
+        directories.append(user_start_menu)
+
+    if(os.path.isdir(common_start_menu)):
+        directories.append(common_start_menu)
+
+    return directories
+
+
+def get_windows_shortcut_target(shortcut_path):
+    powershell_command=(
+        "$shell=New-Object -ComObject WScript.Shell;"
+        f"$shortcut=$shell.CreateShortcut('{shortcut_path}');"
+        "Write-Output $shortcut.TargetPath"
+    )
+
+    try:
+        result=subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                powershell_command
+            ],
+            capture_output=True,
+            text=True
+        )
+    except OSError:
+        return None
+
+    if(result.returncode!=0):
+        return None
+
+    target=result.stdout.strip()
+
+    if(not target):
+        return None
+
+    if(not target.lower().endswith(".exe")):
+        return None
+
+    if(not os.path.isfile(target)):
+        return None
+
+    return os.path.normpath(target)
+
+
+def discover_windows_start_menu_apps():
+    discovered=[]
+
+    for directory in get_windows_start_menu_directories():
+        for root,dirs,files in os.walk(directory):
+            dirs[:]=[
+                directory_name
+                for directory_name in dirs
+                if directory_name.lower() not in {
+                    "startup",
+                    "windows accessories",
+                    "windows administrative tools"
+                }
+            ]
+
+            for file_name in files:
+                if(not file_name.lower().endswith(".lnk")):
+                    continue
+
+                shortcut_path=os.path.join(root,file_name)
+                target=get_windows_shortcut_target(shortcut_path)
+
+                if(not target):
+                    continue
+
+                app_name=os.path.splitext(file_name)[0].strip()
+
+                if(not app_name):
+                    continue
+
+                discovered.append((app_name,target))
+
+    return discovered
+
+
+def discover_windows_executable_apps():
+    discovered=[]
+
+    program_directories=[]
+
+    program_files=os.environ.get("ProgramFiles")
+    program_files_x86=os.environ.get("ProgramFiles(x86)")
+    local_app_data=os.environ.get("LOCALAPPDATA")
+
+    if(program_files and os.path.isdir(program_files)):
+        program_directories.append(program_files)
+
+    if(program_files_x86 and os.path.isdir(program_files_x86)):
+        program_directories.append(program_files_x86)
+
+    if(local_app_data):
+        local_programs=os.path.join(local_app_data,"Programs")
+
+        if(os.path.isdir(local_programs)):
+            program_directories.append(local_programs)
+
+    for base_directory in program_directories:
+        try:
+            for root,dirs,files in os.walk(base_directory):
+                depth=root[len(base_directory):].count(os.sep)
+
+                if(depth>=3):
+                    dirs[:]=[]
+
+                for file_name in files:
+                    if(not file_name.lower().endswith(".exe")):
+                        continue
+
+                    executable_path=os.path.join(root,file_name)
+
+                    if(not os.path.isfile(executable_path)):
+                        continue
+
+                    app_name=os.path.splitext(file_name)[0].strip()
+
+                    if(not app_name):
+                        continue
+
+                    discovered.append((app_name,executable_path))
+
+        except OSError:
+            continue
+
+    return discovered
+
+
+def discover_windows_apps():
+    discovered=discover_windows_start_menu_apps()
+
+    if(not discovered):
+        discovered=discover_windows_executable_apps()
+
+    unique_apps={}
+    app_name_counts={}
+
+    for app_name,app_path in discovered:
+        normalized_path=os.path.normcase(os.path.normpath(app_path))
+        key=(app_name,normalized_path)
+
+        if(key in unique_apps):
+            continue
+
+        unique_apps[key]=app_path
+        app_name_counts[app_name]=app_name_counts.get(app_name,0)+1
+
+    for (app_name,normalized_path),app_path in unique_apps.items():
+        if(app_name_counts[app_name]==1):
+            final_list.append(app_name)
+        else:
+            parent_folder=os.path.basename(os.path.dirname(app_path))
+
+            if(parent_folder):
+                final_list.append([app_name,parent_folder])
+
+
+def get_process_path_windows(selected_app):
+    duplicate_app_name=selected_app
+    parent_folder=None
+
+    if(" | " in duplicate_app_name):
+        duplicate_app_name,parent_folder=duplicate_app_name.split(" | ",1)
+
+    discovered=discover_windows_start_menu_apps()
+
+    if(not discovered):
+        discovered=discover_windows_executable_apps()
+
+    matches=[]
+
+    for app_name,app_path in discovered:
+        if(app_name.lower()!=duplicate_app_name.lower()):
+            continue
+
+        if(parent_folder):
+            if(
+                os.path.basename(os.path.dirname(app_path)).lower()
+                ==parent_folder.lower()
+            ):
+                return app_path
+
+        matches.append(app_path)
+
+    if(len(matches)==1):
+        return matches[0]
+
+    return None
+
+
+def terminate_running_processes_windows(app_path):
+    normalized_target=os.path.normcase(os.path.normpath(app_path))
+
+    for process in psutil.process_iter(["pid","name","exe"]):
+        try:
+            process_executable=process.info["exe"]
+
+            if(not process_executable):
+                continue
+
+            normalized_process=os.path.normcase(
+                os.path.normpath(process_executable)
+            )
+
+            if(normalized_process!=normalized_target):
+                continue
+
+            process.terminate()
+
+            try:
+                process.wait(timeout=2)
+            except psutil.TimeoutExpired:
+                print(
+                    f"ERROR: PID {process.pid} did not terminate within the expected time.",
+                    file=sys.stderr
+                )
+
+                try:
+                    process.kill()
+                    process.wait(timeout=2)
+                except psutil.NoSuchProcess:
+                    continue
+                except psutil.AccessDenied:
+                    print(
+                        f"ERROR: Permission denied while forcing PID {process.pid} to terminate.",
+                        file=sys.stderr
+                    )
+                    continue
+                except psutil.Error as error:
+                    print(
+                        f"ERROR: Could not force PID {process.pid} to terminate: {error}",
+                        file=sys.stderr
+                    )
+                    continue
+
+        except psutil.NoSuchProcess:
+            continue
+        except psutil.AccessDenied:
+            print(
+                f"ERROR: Permission denied while trying to terminate PID {process.pid}.",
+                file=sys.stderr
+            )
+            continue
+        except psutil.Error as error:
+            print(
+                f"ERROR: Could not terminate PID {process.pid}: {error}",
+                file=sys.stderr
+            )
+            continue
+
+
+# ============================================================
+# COMMON APP FUNCTIONS
+# ============================================================
+
+def get_process_path(selected_app):
+    if(operating_system=="Darwin"):
+        return get_process_path_macos(selected_app)
+
+    elif(operating_system=="Windows"):
+        return get_process_path_windows(selected_app)
+
+    return None
+
+
+def terminate_running_processes(app_path):
+    if(operating_system=="Darwin"):
+        terminate_running_processes_macos(app_path)
+
+    elif(operating_system=="Windows"):
+        terminate_running_processes_windows(app_path)
+
+    else:
+        print(
+            f"ERROR: Operating system {operating_system} is not supported.",
+            file=sys.stderr
+        )
+
 
 def block_schedule(schedule,app_paths):
     if(schedule.get("enabled",True) is False):
@@ -226,25 +563,49 @@ def block_schedule(schedule,app_paths):
             )
             return
 
-        if(not os.path.isdir(app_path)):
+        if(not os.path.isfile(app_path) and operating_system=="Windows"):
             print(
-                f"ERROR: The application path is no longer available for {selected_app}.",
+                f"ERROR: The application executable is no longer available for {selected_app}.",
                 file=sys.stderr
             )
             return
 
-        if(not os.path.isdir(f"{app_path}/Contents/MacOS")):
-            print(
-                f"ERROR: Could not find the executable directory for {selected_app}.",
-                file=sys.stderr
-            )
-            return
+        if(operating_system=="Darwin"):
+            if(not os.path.isdir(app_path)):
+                print(
+                    f"ERROR: The application path is no longer available for {selected_app}.",
+                    file=sys.stderr
+                )
+                return
+
+            if(not os.path.isdir(f"{app_path}/Contents/MacOS")):
+                print(
+                    f"ERROR: Could not find the executable directory for {selected_app}.",
+                    file=sys.stderr
+                )
+                return
 
         app_paths[selected_app]=app_path
 
     terminate_running_processes(app_paths[selected_app])
 
+
 def discover_apps():
+    if(operating_system=="Darwin"):
+        discover_macos_apps()
+
+    elif(operating_system=="Windows"):
+        discover_windows_apps()
+
+    else:
+        print(
+            f"ERROR: Operating system {operating_system} is not supported.",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
+
+def discover_macos_apps():
     try:
         path=subprocess.run(
             ["mdfind","kMDItemContentType == 'com.apple.application-bundle'"],
@@ -268,7 +629,10 @@ def discover_apps():
     main_path=path.stdout.splitlines()
 
     for item in main_path:
-        if(item.startswith("/Applications/") or item.startswith("/System/Applications/")):
+        if(
+            item.startswith("/Applications/")
+            or item.startswith("/System/Applications/")
+        ):
             parts=item.split("/")
             app_name=parts[-1]
 
@@ -294,9 +658,13 @@ def discover_apps():
 
         elif(dictionary[item]>1):
             for iteration in new_list_for_i:
-                if(iteration[0]==item and iteration not in processed):
+                if(
+                    iteration[0]==item
+                    and iteration not in processed
+                ):
                     final_list.append([iteration[0],iteration[-1]])
                     processed.append(iteration)
+
 
 def normalize_app_name(app):
     if(isinstance(app,list)):
@@ -304,7 +672,19 @@ def normalize_app_name(app):
 
     return app
 
+
+# ============================================================
+# PROGRAM START
+# ============================================================
+
 try:
+    if(operating_system not in {"Darwin","Windows"}):
+        print(
+            f"ERROR: Operating system {operating_system} is not supported.",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
     discover_apps()
 
     if(len(sys.argv)>1 and sys.argv[1]=="--list-apps"):
@@ -315,18 +695,27 @@ try:
         data=json.load(sys.stdin)
 
         if(not isinstance(data,dict)):
-            print("ERROR: Invalid data received.",file=sys.stderr)
+            print(
+                "ERROR: Invalid data received.",
+                file=sys.stderr
+            )
             sys.exit(1)
 
         schedules=data.get("schedules")
 
         if(not isinstance(schedules,list)):
-            print("ERROR: Invalid schedules received.",file=sys.stderr)
+            print(
+                "ERROR: Invalid schedules received.",
+                file=sys.stderr
+            )
             sys.exit(1)
 
         for schedule in schedules:
             if(not validate_schedule(schedule)):
-                print("ERROR: Invalid schedule received.",file=sys.stderr)
+                print(
+                    "ERROR: Invalid schedule received.",
+                    file=sys.stderr
+                )
                 sys.exit(1)
 
     except json.JSONDecodeError:
@@ -422,9 +811,15 @@ except KeyboardInterrupt:
     sys.exit(1)
 
 except OSError as error:
-    print(f"ERROR: Operating system error: {error}",file=sys.stderr)
+    print(
+        f"ERROR: Operating system error: {error}",
+        file=sys.stderr
+    )
     sys.exit(1)
 
 except Exception as error:
-    print(f"ERROR: Unexpected error: {error}",file=sys.stderr)
+    print(
+        f"ERROR: Unexpected error: {error}",
+        file=sys.stderr
+    )
     sys.exit(1)
