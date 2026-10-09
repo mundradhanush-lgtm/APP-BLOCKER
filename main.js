@@ -136,8 +136,6 @@ function getBlockerPath() {
         ]
     };
 }
-
-
 function getInstallerPath() {
     if (app.isPackaged) {
         return path.join(
@@ -355,7 +353,6 @@ function startBackgroundInstaller() {
 
     installer.unref();
 }
-
 
 function sendSchedulesToWindow() {
     if (

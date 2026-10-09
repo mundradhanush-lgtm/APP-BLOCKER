@@ -12,4 +12,4 @@ module.exports={
             name:"@electron-forge/maker-dmg"
         }
     ]
-};
+}
