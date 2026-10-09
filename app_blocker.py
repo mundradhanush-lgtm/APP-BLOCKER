@@ -1,4 +1,5 @@
-from datetime import datetime as dt,timedelta
+
+from datetime import datetime as dt, timedelta
 import psutil
 import subprocess
 import sys
@@ -7,34 +8,28 @@ import os
 import time
 from pathlib import Path
 
-dictionary={}
-main_list=[]
-new_list_for_i=[]
-processed=[]
-final_list=[]
 
-if(sys.platform!="darwin"):
+if sys.platform != "darwin":
     print(
         f"ERROR: Operating system {sys.platform} is not supported.",
         file=sys.stderr
     )
     sys.exit(1)
 
-schedules_file=(
+
+schedules_file = (
     Path.home()
-    /"Library"
-    /"Application Support"
-    /"python-projects"
-    /"schedules.json"
+    / "Library"
+    / "Application Support"
+    / "python-projects"
+    / "schedules.json"
 )
 
-if(
-    len(sys.argv)>1
-    and
-    sys.argv[1]=="--list-apps"
-):
+
+# Discover installed applications.
+if len(sys.argv) > 1 and sys.argv[1] == "--list-apps":
     try:
-        path=subprocess.run(
+        result = subprocess.run(
             [
                 "mdfind",
                 "kMDItemContentType == 'com.apple.application-bundle'"
@@ -50,134 +45,103 @@ if(
         )
         sys.exit(1)
 
-    if(path.returncode!=0):
+    if result.returncode != 0:
         print(
             "ERROR: Could not discover installed applications.",
             file=sys.stderr
         )
         sys.exit(1)
 
-    main_path=path.stdout.splitlines()
+    applications = {}
 
-    for item in main_path:
-        if(
-            item.startswith("/Applications/")
-            or
-            item.startswith("/System/Applications/")
+    for item in result.stdout.splitlines():
+        if (
+            not item.startswith("/Applications/")
+            and not item.startswith("/System/Applications/")
         ):
-            parts=item.split("/")
+            continue
 
-            app_name=parts[-1]
+        parts = item.split("/")
+        app_name = parts[-1]
 
-            if(not app_name.endswith(".app")):
-                continue
+        if not app_name.endswith(".app"):
+            continue
 
-            app_name=app_name.removesuffix(".app")
+        app_name = app_name.removesuffix(".app")
 
-            if(not app_name.strip()):
-                continue
+        if not app_name.strip():
+            continue
 
-            main_list.append(app_name)
+        parent_folder = parts[-2]
 
-            if(app_name in dictionary):
-                dictionary[app_name]+=1
+        applications.setdefault(app_name, []).append(parent_folder)
 
-                new_list_for_i.append(
-                    [
-                        app_name,
-                        parts[-2]
-                    ]
-                )
+    final_list = []
 
-            else:
-                dictionary[app_name]=1
+    for app_name, folders in sorted(applications.items()):
+        unique_folders = sorted(set(folders))
 
-    for item in main_list:
-        if(dictionary[item]==1):
-            final_list.append(item)
+        if len(unique_folders) == 1:
+            final_list.append(app_name)
+        else:
+            for folder in unique_folders:
+                final_list.append([app_name, folder])
 
-        elif(dictionary[item]>1):
-            for iteration in new_list_for_i:
-                if(
-                    iteration[0]==item
-                    and
-                    iteration not in processed
-                ):
-                    final_list.append(
-                        [
-                            iteration[0],
-                            iteration[-1]
-                        ]
-                    )
-
-                    processed.append(iteration)
-
-    print(
-        json.dumps(final_list),
-        flush=True
-    )
-
+    print(json.dumps(final_list), flush=True)
     sys.exit(0)
 
-schedules=None
 
-if(not sys.stdin.isatty()):
+# Read schedules supplied by the Electron application.
+schedules = None
+
+if not sys.stdin.isatty():
     try:
-        data=json.load(sys.stdin)
+        data = json.load(sys.stdin)
 
-        if(
-            isinstance(data,dict)
-            and
-            isinstance(
-                data.get("schedules"),
-                list
-            )
+        if (
+            isinstance(data, dict)
+            and isinstance(data.get("schedules"), list)
         ):
-            schedules=data["schedules"]
+            schedules = data["schedules"]
 
-    except(
-        json.JSONDecodeError,
-        OSError
-    ):
-        schedules=None
+    except (json.JSONDecodeError, OSError):
+        schedules = None
 
-if(schedules is None):
+
+# Load saved schedules if none were supplied through standard input.
+if schedules is None:
     try:
-        if(schedules_file.exists()):
+        if schedules_file.exists():
             with open(
                 schedules_file,
                 "r",
                 encoding="utf-8"
             ) as file:
-                schedules=json.load(file)
-
+                schedules = json.load(file)
         else:
-            schedules=[]
+            schedules = []
 
-    except(
-        OSError,
-        json.JSONDecodeError
-    ):
-        schedules=[]
+    except (OSError, json.JSONDecodeError):
+        schedules = []
 
-if(not isinstance(schedules,list)):
+
+if not isinstance(schedules, list):
     print(
         "ERROR: Invalid schedules received.",
         file=sys.stderr
     )
     sys.exit(1)
 
-valid_schedules=[]
+
+# Validate schedules before starting the blocker.
+valid_schedules = []
 
 for schedule in schedules:
-    if(not isinstance(schedule,dict)):
-        print(
-            "ERROR: Invalid schedule received.",
-            file=sys.stderr
-        )
+    if not isinstance(schedule, dict):
+        print("ERROR: Invalid schedule received.", file=sys.stderr)
         continue
 
-    required={
+    required = {
         "app",
         "start",
         "end",
@@ -186,150 +150,97 @@ for schedule in schedules:
         "date"
     }
 
-    if(not required.issubset(schedule.keys())):
-        print(
-            "ERROR: Invalid schedule received.",
-            file=sys.stderr
-        )
+    if not required.issubset(schedule.keys()):
+        print("ERROR: Invalid schedule received.", file=sys.stderr)
         continue
 
-    if(
-        not isinstance(schedule["app"],str)
-        or
-        not schedule["app"].strip()
+    if (
+        not isinstance(schedule["app"], str)
+        or not schedule["app"].strip()
     ):
-        print(
-            "ERROR: Invalid schedule received.",
-            file=sys.stderr
-        )
+        print("ERROR: Invalid schedule received.", file=sys.stderr)
         continue
 
-    if(
-        not isinstance(schedule["start"],str)
-        or
-        not isinstance(schedule["end"],str)
+    if (
+        not isinstance(schedule["start"], str)
+        or not isinstance(schedule["end"], str)
     ):
-        print(
-            "ERROR: Invalid schedule received.",
-            file=sys.stderr
-        )
+        print("ERROR: Invalid schedule received.", file=sys.stderr)
         continue
 
-    if(
-        schedule["type"]
-        not in
-        {
-            "today",
-            "specific_date",
-            "every_day",
-            "selected_days"
-        }
-    ):
-        print(
-            "ERROR: Invalid schedule received.",
-            file=sys.stderr
-        )
+    if schedule["type"] not in {
+        "today",
+        "specific_date",
+        "every_day",
+        "selected_days"
+    }:
+        print("ERROR: Invalid schedule received.", file=sys.stderr)
         continue
 
-    if(not isinstance(schedule["days"],list)):
-        print(
-            "ERROR: Invalid schedule received.",
-            file=sys.stderr
-        )
+    if not isinstance(schedule["days"], list):
+        print("ERROR: Invalid schedule received.", file=sys.stderr)
         continue
 
-    if(
-        schedule["type"]
-        in
-        {
-            "today",
-            "specific_date"
-        }
-    ):
+    if schedule["type"] in {"today", "specific_date"}:
         try:
-            dt.strptime(
-                schedule["date"],
-                "%d/%m/%Y"
-            )
-
-        except(
-            TypeError,
-            ValueError
-        ):
-            print(
-                "ERROR: Invalid schedule received.",
-                file=sys.stderr
-            )
+            dt.strptime(schedule["date"], "%d/%m/%Y")
+        except (TypeError, ValueError):
+            print("ERROR: Invalid schedule received.", file=sys.stderr)
             continue
 
     try:
-        start=dt.strptime(
-            schedule["start"],
-            "%H:%M"
-        ).time()
+        start = dt.strptime(schedule["start"], "%H:%M").time()
+        end = dt.strptime(schedule["end"], "%H:%M").time()
 
-        end=dt.strptime(
-            schedule["end"],
-            "%H:%M"
-        ).time()
-
-    except(
-        TypeError,
-        ValueError
-    ):
-        print(
-            "ERROR: Invalid schedule received.",
-            file=sys.stderr
-        )
+    except (TypeError, ValueError):
+        print("ERROR: Invalid schedule received.", file=sys.stderr)
         continue
 
-    if(start==end):
-        print(
-            "ERROR: Invalid schedule received.",
-            file=sys.stderr
-        )
+    if start == end:
+        print("ERROR: Invalid schedule received.", file=sys.stderr)
         continue
 
     valid_schedules.append(schedule)
 
-schedules=valid_schedules
 
-if(not schedules):
-    print(
-        "ALLOWED",
-        flush=True
-    )
+schedules = valid_schedules
 
-app_paths={}
-announced_active=set()
-failed_app_messages=set()
+if not schedules:
+    print("ALLOWED", flush=True)
+
+
+app_paths = {}
+announced_active = set()
+failed_app_messages = set()
 
 print(
     f"BLOCKER READY: Monitoring {len(schedules)} schedule(s).",
     flush=True
 )
 
+
 try:
     while True:
-        current=dt.now()
+        current = dt.now()
 
+        # Reload saved schedules so changes take effect without restarting.
         try:
-            if(schedules_file.exists()):
+            if schedules_file.exists():
                 with open(
                     schedules_file,
                     "r",
                     encoding="utf-8"
                 ) as file:
-                    saved_schedules=json.load(file)
+                    saved_schedules = json.load(file)
 
-                if(isinstance(saved_schedules,list)):
-                    valid_schedules=[]
+                if isinstance(saved_schedules, list):
+                    valid_schedules = []
 
                     for schedule in saved_schedules:
-                        if(not isinstance(schedule,dict)):
+                        if not isinstance(schedule, dict):
                             continue
 
-                        required={
+                        required = {
                             "app",
                             "start",
                             "end",
@@ -338,242 +249,187 @@ try:
                             "date"
                         }
 
-                        if(not required.issubset(schedule.keys())):
+                        if not required.issubset(schedule.keys()):
                             continue
 
-                        if(
-                            not isinstance(schedule["app"],str)
-                            or
-                            not schedule["app"].strip()
+                        if (
+                            not isinstance(schedule["app"], str)
+                            or not schedule["app"].strip()
                         ):
                             continue
 
-                        if(
-                            not isinstance(schedule["start"],str)
-                            or
-                            not isinstance(schedule["end"],str)
+                        if (
+                            not isinstance(schedule["start"], str)
+                            or not isinstance(schedule["end"], str)
                         ):
                             continue
 
-                        if(
-                            schedule["type"]
-                            not in
-                            {
-                                "today",
-                                "specific_date",
-                                "every_day",
-                                "selected_days"
-                            }
-                        ):
+                        if schedule["type"] not in {
+                            "today",
+                            "specific_date",
+                            "every_day",
+                            "selected_days"
+                        }:
                             continue
 
-                        if(not isinstance(schedule["days"],list)):
+                        if not isinstance(schedule["days"], list):
                             continue
 
-                        if(
-                            schedule["type"]
-                            in
-                            {
-                                "today",
-                                "specific_date"
-                            }
-                        ):
+                        if schedule["type"] in {
+                            "today",
+                            "specific_date"
+                        }:
                             try:
                                 dt.strptime(
                                     schedule["date"],
                                     "%d/%m/%Y"
                                 )
-
-                            except(
-                                TypeError,
-                                ValueError
-                            ):
+                            except (TypeError, ValueError):
                                 continue
 
                         try:
-                            start=dt.strptime(
+                            start = dt.strptime(
                                 schedule["start"],
                                 "%H:%M"
                             ).time()
 
-                            end=dt.strptime(
+                            end = dt.strptime(
                                 schedule["end"],
                                 "%H:%M"
                             ).time()
 
-                        except(
-                            TypeError,
-                            ValueError
-                        ):
+                        except (TypeError, ValueError):
                             continue
 
-                        if(start==end):
+                        if start == end:
                             continue
 
                         valid_schedules.append(schedule)
 
-                    schedules=valid_schedules
+                    schedules = valid_schedules
 
-        except(
-            OSError,
-            json.JSONDecodeError
-        ):
+        except (OSError, json.JSONDecodeError):
             pass
 
-        active_schedules=[]
+        active_schedules = []
 
+        # Check which schedules are active right now.
         for schedule in schedules:
-            if(
-                schedule.get(
-                    "enabled",
-                    True
-                )
-                is
-                False
-            ):
+            if schedule.get("enabled", True) is False:
                 continue
 
             try:
-                start=dt.strptime(
+                start = dt.strptime(
                     schedule["start"],
                     "%H:%M"
                 ).time()
 
-                end=dt.strptime(
+                end = dt.strptime(
                     schedule["end"],
                     "%H:%M"
                 ).time()
 
-            except(
-                KeyError,
-                TypeError,
-                ValueError
-            ):
+            except (KeyError, TypeError, ValueError):
                 continue
 
-            current_time=current.time()
-            current_date=current.date()
+            current_time = current.time()
+            current_date = current.date()
 
-            schedule_starts_today=False
+            schedule_starts_today = False
 
-            if(schedule["type"]=="every_day"):
-                schedule_starts_today=True
+            if schedule["type"] == "every_day":
+                schedule_starts_today = True
 
-            elif(schedule["type"]=="today"):
-                schedule_starts_today=(
+            elif schedule["type"] in {"today", "specific_date"}:
+                schedule_starts_today = (
                     schedule.get("date")
-                    ==
-                    current_date.strftime("%d/%m/%Y")
+                    == current_date.strftime("%d/%m/%Y")
                 )
 
-            elif(schedule["type"]=="specific_date"):
-                schedule_starts_today=(
-                    schedule.get("date")
-                    ==
-                    current_date.strftime("%d/%m/%Y")
-                )
-
-            elif(schedule["type"]=="selected_days"):
-                schedule_starts_today=(
+            elif schedule["type"] == "selected_days":
+                schedule_starts_today = (
                     current_date.strftime("%A")
-                    in
-                    schedule.get("days",[])
+                    in schedule.get("days", [])
                 )
 
-            schedule_is_active=False
+            schedule_is_active = False
 
-            if(start<end):
-                if(
+            if start < end:
+                if (
                     schedule_starts_today
-                    and
-                    start<=current_time<end
+                    and start <= current_time < end
                 ):
-                    schedule_is_active=True
+                    schedule_is_active = True
 
             else:
-                previous_date=current_date-timedelta(days=1)
+                # Handle schedules that continue past midnight.
+                previous_date = current_date - timedelta(days=1)
+                schedule_starts_previous = False
 
-                schedule_starts_previous=False
+                if schedule["type"] == "every_day":
+                    schedule_starts_previous = True
 
-                if(schedule["type"]=="every_day"):
-                    schedule_starts_previous=True
-
-                elif(schedule["type"]=="today"):
-                    schedule_starts_previous=(
+                elif schedule["type"] in {"today", "specific_date"}:
+                    schedule_starts_previous = (
                         schedule.get("date")
-                        ==
-                        previous_date.strftime("%d/%m/%Y")
+                        == previous_date.strftime("%d/%m/%Y")
                     )
 
-                elif(schedule["type"]=="specific_date"):
-                    schedule_starts_previous=(
-                        schedule.get("date")
-                        ==
-                        previous_date.strftime("%d/%m/%Y")
-                    )
-
-                elif(schedule["type"]=="selected_days"):
-                    schedule_starts_previous=(
+                elif schedule["type"] == "selected_days":
+                    schedule_starts_previous = (
                         previous_date.strftime("%A")
-                        in
-                        schedule.get("days",[])
+                        in schedule.get("days", [])
                     )
 
-                if(
+                if (
                     schedule_starts_today
-                    and
-                    current_time>=start
+                    and current_time >= start
                 ):
-                    schedule_is_active=True
+                    schedule_is_active = True
 
-                elif(
+                elif (
                     schedule_starts_previous
-                    and
-                    current_time<end
+                    and current_time < end
                 ):
-                    schedule_is_active=True
+                    schedule_is_active = True
 
-            if(schedule_is_active):
+            if schedule_is_active:
                 active_schedules.append(schedule)
 
+        # Enforce every active schedule.
         for schedule in active_schedules:
-            schedule_key=(
+            schedule_key = (
                 schedule.get("id"),
                 schedule["app"],
                 schedule["start"],
                 schedule["end"],
                 schedule["type"],
                 schedule.get("date"),
-                tuple(
-                    schedule.get(
-                        "days",
-                        []
-                    )
-                )
+                tuple(schedule.get("days", []))
             )
 
-            if(schedule_key not in announced_active):
+            if schedule_key not in announced_active:
                 print(
-                    f"BLOCKING: {schedule['app']} from {schedule['start']} until {schedule['end']}.",
+                    f"BLOCKING: {schedule['app']} from "
+                    f"{schedule['start']} until {schedule['end']}.",
                     flush=True
                 )
-
                 announced_active.add(schedule_key)
 
-            selected_app=schedule["app"]
+            selected_app = schedule["app"]
 
-            if(selected_app not in app_paths):
-                duplicate_app_name=selected_app
-                parent_folder=None
+            # Find and cache the selected application's full path.
+            if selected_app not in app_paths:
+                duplicate_app_name = selected_app
+                parent_folder = None
 
-                if(" | " in duplicate_app_name):
-                    duplicate_app_name,parent_folder=duplicate_app_name.split(
-                        " | ",
-                        1
+                if " | " in duplicate_app_name:
+                    duplicate_app_name, parent_folder = (
+                        duplicate_app_name.split(" | ", 1)
                     )
 
                 try:
-                    app_search=subprocess.run(
+                    app_search = subprocess.run(
                         [
                             "mdfind",
                             f"kMDItemFSName == '{duplicate_app_name}.app'"
@@ -583,103 +439,99 @@ try:
                     )
 
                 except OSError as error:
-                    if(selected_app not in failed_app_messages):
+                    if selected_app not in failed_app_messages:
                         print(
-                            f"ERROR: Could not start application search: {error}",
+                            f"ERROR: Could not start application search: "
+                            f"{error}",
                             file=sys.stderr
                         )
-
                         failed_app_messages.add(selected_app)
 
                     continue
 
-                if(app_search.returncode!=0):
-                    if(selected_app not in failed_app_messages):
+                if app_search.returncode != 0:
+                    if selected_app not in failed_app_messages:
                         print(
-                            f"ERROR: Could not search for the application {selected_app}.",
+                            f"ERROR: Could not search for the application "
+                            f"{selected_app}.",
                             file=sys.stderr
                         )
-
                         failed_app_messages.add(selected_app)
 
                     continue
 
-                paths=app_search.stdout.splitlines()
+                paths = app_search.stdout.splitlines()
+                app_path = None
 
-                app_path=None
-
-                if(parent_folder):
+                if parent_folder:
                     for check in paths:
-                        if(
+                        if (
                             f"/{parent_folder}/" in check
-                            and
-                            check.endswith(
+                            and check.endswith(
                                 f"/{duplicate_app_name}.app"
                             )
                         ):
-                            app_path=check
+                            app_path = check
                             break
 
                 else:
-                    if(len(paths)==1):
-                        app_path=paths[0]
-
+                    if len(paths) == 1:
+                        app_path = paths[0]
                     else:
                         for check in paths:
-                            if(
-                                check.endswith(
-                                    f"/{duplicate_app_name}.app"
-                                )
+                            if check.endswith(
+                                f"/{duplicate_app_name}.app"
                             ):
-                                app_path=check
+                                app_path = check
                                 break
 
-                if(not app_path):
-                    if(selected_app not in failed_app_messages):
+                if not app_path:
+                    if selected_app not in failed_app_messages:
                         print(
-                            f"ERROR: Could not find the application path for {selected_app}.",
+                            f"ERROR: Could not find the application path "
+                            f"for {selected_app}.",
                             file=sys.stderr
                         )
-
                         failed_app_messages.add(selected_app)
 
                     continue
 
-                if(not os.path.isdir(app_path)):
-                    if(selected_app not in failed_app_messages):
+                if not os.path.isdir(app_path):
+                    if selected_app not in failed_app_messages:
                         print(
-                            f"ERROR: The application path is no longer available for {selected_app}.",
+                            f"ERROR: The application path is no longer "
+                            f"available for {selected_app}.",
                             file=sys.stderr
                         )
-
                         failed_app_messages.add(selected_app)
 
                     continue
 
-                executable_directory=(
+                executable_directory = (
                     f"{app_path}/Contents/MacOS"
                 )
 
-                if(not os.path.isdir(executable_directory)):
-                    if(selected_app not in failed_app_messages):
+                if not os.path.isdir(executable_directory):
+                    if selected_app not in failed_app_messages:
                         print(
-                            f"ERROR: Could not find the executable directory for {selected_app}.",
+                            f"ERROR: Could not find the executable "
+                            f"directory for {selected_app}.",
                             file=sys.stderr
                         )
-
                         failed_app_messages.add(selected_app)
 
                     continue
 
-                app_paths[selected_app]=app_path
+                app_paths[selected_app] = app_path
 
-                if(selected_app in failed_app_messages):
+                if selected_app in failed_app_messages:
                     failed_app_messages.remove(selected_app)
 
-            app_path=app_paths[selected_app]
+            app_path = app_paths[selected_app]
 
+            # Find running processes belonging to this application.
             try:
-                pid=subprocess.run(
+                pid = subprocess.run(
                     [
                         "pgrep",
                         "-f",
@@ -696,20 +548,20 @@ try:
                 )
                 continue
 
-            if(pid.returncode not in (0,1)):
+            if pid.returncode not in (0, 1):
                 print(
-                    "ERROR: Could not check whether the application is running.",
+                    "ERROR: Could not check whether the application "
+                    "is running.",
                     file=sys.stderr
                 )
                 continue
 
-            final_pids=pid.stdout.splitlines()
+            final_pids = pid.stdout.splitlines()
 
             for final_pid in final_pids:
                 try:
-                    final_pid=int(final_pid)
-
-                    process=psutil.Process(final_pid)
+                    final_pid = int(final_pid)
+                    process = psutil.Process(final_pid)
 
                     print(
                         f"TERMINATING: PID {final_pid}",
@@ -723,7 +575,8 @@ try:
 
                     except psutil.TimeoutExpired:
                         print(
-                            f"ERROR: PID {final_pid} did not terminate within the expected time.",
+                            f"ERROR: PID {final_pid} did not terminate "
+                            "within the expected time.",
                             file=sys.stderr
                         )
 
@@ -736,14 +589,16 @@ try:
 
                         except psutil.AccessDenied:
                             print(
-                                f"ERROR: Permission denied while forcing PID {final_pid} to terminate.",
+                                f"ERROR: Permission denied while forcing "
+                                f"PID {final_pid} to terminate.",
                                 file=sys.stderr
                             )
                             continue
 
                         except psutil.Error as error:
                             print(
-                                f"ERROR: Could not force PID {final_pid} to terminate: {error}",
+                                f"ERROR: Could not force PID {final_pid} "
+                                f"to terminate: {error}",
                                 file=sys.stderr
                             )
                             continue
@@ -756,19 +611,21 @@ try:
 
                 except psutil.AccessDenied:
                     print(
-                        f"ERROR: Permission denied while trying to terminate PID {final_pid}.",
+                        f"ERROR: Permission denied while trying to "
+                        f"terminate PID {final_pid}.",
                         file=sys.stderr
                     )
                     continue
 
                 except psutil.Error as error:
                     print(
-                        f"ERROR: Could not terminate PID {final_pid}: {error}",
+                        f"ERROR: Could not terminate PID {final_pid}: "
+                        f"{error}",
                         file=sys.stderr
                     )
                     continue
 
-        if(not active_schedules):
+        if not active_schedules:
             announced_active.clear()
 
         time.sleep(1)

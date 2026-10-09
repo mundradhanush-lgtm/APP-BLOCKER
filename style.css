@@ -1,5 +1,10 @@
+
 * {
     box-sizing: border-box;
+}
+
+[hidden] {
+    display: none !important;
 }
 
 body {
@@ -58,6 +63,10 @@ label {
     display: block;
 }
 
+#home_view[hidden] {
+    display: none !important;
+}
+
 #schedule_list {
     display: flex;
     flex-direction: column;
@@ -76,6 +85,7 @@ label {
 }
 
 .schedule_bar {
+    position: relative;
     padding: 1rem 1.125rem;
     background-color: #0D1929;
     border: 1px solid #304863;
@@ -102,12 +112,27 @@ label {
     font-size: 0.875rem;
 }
 
+.schedule_disabled {
+    opacity: 0.55;
+}
+
+.schedule_disabled .schedule_time {
+    color: #AEBBCB;
+}
+
+.schedule_status {
+    margin: 0.375rem 0 0;
+    color: #FF5C5C;
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
 #add_schedule_view {
     display: block;
 }
 
 #add_schedule_view[hidden] {
-    display: none;
+    display: none !important;
 }
 
 #app_selector {
@@ -181,7 +206,7 @@ strong {
 }
 
 #specific_date_section[hidden] {
-    display: none;
+    display: none !important;
 }
 
 #schedule_type {
@@ -198,7 +223,7 @@ strong {
 }
 
 #selected_days_section[hidden] {
-    display: none;
+    display: none !important;
 }
 
 #selected_days_section h2 {
@@ -276,8 +301,71 @@ button:focus-visible {
     font-size: 0.9375rem;
 }
 
-@media (max-width: 600px) {
+.validation_error {
+    margin: 0 0 0.75rem;
+    color: #FF5C5C;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
 
+.schedule_menu_button {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    width: 2rem;
+    height: 2rem;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    color: #AEBBCB;
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1;
+    border: none;
+    border-radius: 0.375rem;
+}
+
+.schedule_menu_button:hover {
+    background-color: #304863;
+    color: #F5F7FB;
+}
+
+.schedule_menu_button:active {
+    transform: none;
+}
+
+.schedule_menu {
+    position: absolute;
+    top: 3rem;
+    right: 0.75rem;
+    z-index: 10;
+    min-width: 8.5rem;
+    padding: 0.375rem;
+    background-color: #17263B;
+    border: 1px solid #304863;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.3);
+}
+
+.schedule_menu button {
+    height: 2.25rem;
+    margin: 0;
+    background: transparent;
+    color: #F5F7FB;
+    text-align: left;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.schedule_menu button:hover {
+    background-color: #304863;
+}
+
+.schedule_menu button:active {
+    transform: none;
+}
+
+@media (max-width: 600px) {
     main {
         width: 94%;
         padding: 1.5rem;
