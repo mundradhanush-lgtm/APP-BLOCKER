@@ -22,6 +22,12 @@ const end_hour=document.querySelector("#end_hour");
 const end_minutes=document.querySelector("#end_minutes");
 const end_ampm=document.querySelector("#end_ampm");
 let schedules=[];
+window.electronAPI.receiveSchedules((saved_schedules)=>{
+    if(Array.isArray(saved_schedules)){
+        schedules=saved_schedules;
+        renderScheduleList();
+    }
+});
 let selected_app_for_another_schedule=null;
 let editing_schedule_id=null;
 const error_style=document.createElement("style");
@@ -626,3 +632,4 @@ function convertToDisplayTime(time){
     }
     return hour+":"+minutes+" "+ampm;
 }
+window.electronAPI.requestSchedules();
