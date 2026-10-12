@@ -35,12 +35,16 @@ APP_ROOTS = [
     HOME / "Applications",
 ]
 
-POLL_INTERVAL = 1
+# CHANGED: Check schedules five times per second.
+POLL_INTERVAL = 0.2
+
+# Unchanged: Cache installed applications for 60 seconds.
 APP_CACHE_SECONDS = 60
 
 _application_paths_cache = None
 _application_paths_cache_time = 0.0
 _blocker_lock_file = None
+
 
 def acquire_single_instance_lock():
     """
@@ -80,6 +84,7 @@ def acquire_single_instance_lock():
         )
         return False
 
+
 def parent_label(app_path):
     """Return a readable parent-folder label for an app."""
 
@@ -113,6 +118,7 @@ def scan_application_paths():
             try:
                 if not entry.is_dir():
                     continue
+
                 if entry.name.endswith(".app"):
                     found.add(str(entry))
                     continue
@@ -224,7 +230,9 @@ def get_application_labels(paths):
                         f"{labels[path]} ({path})"
                     )
             break
+
     return labels
+
 
 def list_applications():
     """Return applications in the format expected by Electron."""
@@ -236,6 +244,7 @@ def list_applications():
     ):
         app_path = Path(app_path_text)
         name = app_path.name[:-4]
+
         if name in {"Finder", "System Settings"}:
             continue
 
@@ -304,7 +313,9 @@ def resolve_application_path(selected_app):
         for path in candidates:
             if labels[path] == requested_parent:
                 return path
+
         return None
+
     candidates.sort(
         key=lambda path: (
             0 if path.startswith("/Applications/") else 1,
@@ -313,6 +324,7 @@ def resolve_application_path(selected_app):
     )
 
     return candidates[0]
+
 
 def read_schedules():
     """
@@ -351,6 +363,7 @@ def read_schedules():
         )
 
         return None
+
 
 VALID_SCHEDULE_TYPES = {
     "today",
@@ -467,6 +480,7 @@ def load_valid_schedules():
 
     return valid
 
+
 def schedules_start_on(schedule, date):
     """Check whether a schedule starts on a particular date."""
 
@@ -535,6 +549,7 @@ def schedule_is_active(schedule, now):
         )
     )
 
+
 def process_belongs_to_application(process, app_path):
     """
     Check whether a process executable belongs to an app bundle.
@@ -556,6 +571,7 @@ def process_belongs_to_application(process, app_path):
 
             if executable.startswith(bundle_prefix):
                 return True
+
         command_line = info.get("cmdline") or []
 
         if command_line:
@@ -660,6 +676,7 @@ def terminate_application(selected_app):
 
     return terminated
 
+
 def schedule_key(schedule):
     """Create a stable key for tracking active schedules."""
 
@@ -672,6 +689,7 @@ def schedule_key(schedule):
         schedule.get("date"),
         tuple(schedule.get("days", [])),
     )
+
 
 def main():
     # Electron uses this command to populate the app dropdown.
@@ -741,9 +759,6 @@ def main():
                     )
 
                 terminate_application(schedule["app"])
-
-            announced_active = active_keys
-
             time.sleep(POLL_INTERVAL)
 
         except KeyboardInterrupt:
@@ -759,7 +774,6 @@ def main():
                 file=sys.stderr,
                 flush=True,
             )
-
             time.sleep(2)
-if(__name__ == "__main__"):
+if __name__ == "__main__":
     sys.exit(main())
