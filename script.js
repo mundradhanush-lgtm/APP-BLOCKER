@@ -1,4 +1,3 @@
-
 const app_selector = document.querySelector("#app_selector");
 const status_message = document.querySelector("#status_message");
 const home_view = document.querySelector("#home_view");

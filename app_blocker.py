@@ -1,11 +1,11 @@
 from datetime import datetime as dt, timedelta
 from pathlib import Path
+import fcntl
 import json
 import os
-import subprocess
+import psutil
 import sys
 import time
-import psutil
 
 if sys.platform != "darwin":
     print(
@@ -18,13 +18,15 @@ if sys.platform != "darwin":
 
 HOME = Path.home()
 
-SCHEDULES_FILE = (
+APP_SUPPORT = (
     HOME
     / "Library"
     / "Application Support"
     / "python-projects"
-    / "schedules.json"
 )
+
+SCHEDULES_FILE = APP_SUPPORT / "schedules.json"
+LOCK_FILE = APP_SUPPORT / "app_blocker.lock"
 
 APP_ROOTS = [
     Path("/Applications"),
@@ -38,9 +40,48 @@ APP_CACHE_SECONDS = 60
 
 _application_paths_cache = None
 _application_paths_cache_time = 0.0
+_blocker_lock_file = None
+
+def acquire_single_instance_lock():
+    """
+    Prevent multiple Python blocker loops from running
+    simultaneously.
+
+    The operating system releases this lock automatically
+    when the owning process exits.
+    """
+
+    global _blocker_lock_file
+
+    try:
+        APP_SUPPORT.mkdir(parents=True, exist_ok=True)
+
+        _blocker_lock_file = LOCK_FILE.open("a")
+
+        fcntl.flock(
+            _blocker_lock_file.fileno(),
+            fcntl.LOCK_EX | fcntl.LOCK_NB,
+        )
+
+        return True
+
+    except BlockingIOError:
+        print(
+            "BLOCKER ALREADY RUNNING.",
+            flush=True,
+        )
+        return False
+
+    except OSError as error:
+        print(
+            f"ERROR: Could not acquire blocker lock: {error}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
 
 def parent_label(app_path):
-    """Return the folder label used to distinguish duplicate apps."""
+    """Return a readable parent-folder label for an app."""
 
     parent = app_path.parent.name
 
@@ -48,16 +89,17 @@ def parent_label(app_path):
         if parent == "Applications":
             return "System Applications"
 
-    if str(app_path).startswith(str(HOME / "Applications") + "/"):
+    user_apps = str(HOME / "Applications")
+
+    if str(app_path).startswith(user_apps + "/"):
         if parent == "Applications":
             return "User Applications"
 
     return parent
 
 
-
 def scan_application_paths():
-    """Find actual application bundles in application folders."""
+    """Find application bundles without scanning build folders."""
 
     found = set()
 
@@ -71,7 +113,6 @@ def scan_application_paths():
             try:
                 if not entry.is_dir():
                     continue
-
                 if entry.name.endswith(".app"):
                     found.add(str(entry))
                     continue
@@ -87,6 +128,7 @@ def scan_application_paths():
             continue
 
         if root == Path("/System/Applications"):
+            # Only scan immediate application bundles here.
             try:
                 for entry in root.iterdir():
                     if entry.is_dir() and entry.name.endswith(".app"):
@@ -98,8 +140,9 @@ def scan_application_paths():
 
     return found
 
+
 def discover_application_paths(force_refresh=False):
-    """Discover installed apps without searching build folders."""
+    """Discover installed apps and cache the results."""
 
     global _application_paths_cache
     global _application_paths_cache_time
@@ -119,10 +162,69 @@ def discover_application_paths(force_refresh=False):
         paths,
         key=str.casefold,
     )
+
     _application_paths_cache_time = time.monotonic()
 
     return list(_application_paths_cache)
 
+
+def get_application_labels(paths):
+    """
+    Generate distinct labels for applications sharing a name.
+
+    The labels are also used when resolving the app selected
+    in the Electron dropdown.
+    """
+
+    labels = {
+        path: parent_label(Path(path))
+        for path in paths
+    }
+
+    while True:
+        groups = {}
+
+        for path, label in labels.items():
+            groups.setdefault(label.casefold(), []).append(path)
+
+        duplicates = [
+            paths_with_same_label
+            for paths_with_same_label in groups.values()
+            if len(paths_with_same_label) > 1
+        ]
+
+        if not duplicates:
+            break
+
+        changed = False
+
+        for duplicate_paths in duplicates:
+            for path in duplicate_paths:
+                app_path = Path(path)
+                parent = app_path.parent
+
+                if parent.parent == parent:
+                    continue
+
+                ancestor = parent.parent.name
+
+                if not ancestor:
+                    ancestor = str(parent.parent)
+
+                new_label = f"{ancestor} / {labels[path]}"
+
+                if new_label != labels[path]:
+                    labels[path] = new_label
+                    changed = True
+
+        if not changed:
+            for duplicate_paths in duplicates:
+                for path in duplicate_paths:
+                    labels[path] = (
+                        f"{labels[path]} ({path})"
+                    )
+            break
+    return labels
 
 def list_applications():
     """Return applications in the format expected by Electron."""
@@ -136,95 +238,88 @@ def list_applications():
         name = app_path.name[:-4]
         if name in {"Finder", "System Settings"}:
             continue
-        label = parent_label(app_path)
 
-        grouped.setdefault(name, []).append(
-            (label, str(app_path))
-        )
+        grouped.setdefault(name, []).append(str(app_path))
 
     result = []
 
-    for name, entries in sorted(
+    for name, paths in sorted(
         grouped.items(),
         key=lambda item: item[0].casefold(),
     ):
-        entries.sort(key=lambda entry: entry[1].casefold())
+        paths.sort(key=str.casefold)
 
-        if len(entries) == 1:
+        if len(paths) == 1:
             result.append(name)
             continue
 
-        used_labels = set()
+        labels = get_application_labels(paths)
 
-        for label, app_path in entries:
-            if label in used_labels:
-                parent = Path(app_path).parent.parent.name
-                label = f"{parent} / {label}"
-
-            used_labels.add(label)
-            result.append([name, label])
+        for path in paths:
+            result.append([name, labels[path]])
 
     return result
 
+
 def resolve_application_path(selected_app):
-    """Resolve an application name to its actual .app bundle."""
+    """Resolve an Electron selection to an actual .app bundle."""
 
     if not isinstance(selected_app, str):
         return None
 
-    app_name = selected_app.strip()
+    selected_app = selected_app.strip()
+
+    if not selected_app:
+        return None
+
     requested_parent = None
 
-    if " | " in app_name:
-        app_name, requested_parent = app_name.split(" | ", 1)
+    if " | " in selected_app:
+        app_name, requested_parent = selected_app.split(
+            " | ",
+            1,
+        )
+        app_name = app_name.strip()
+        requested_parent = requested_parent.strip()
+    else:
+        app_name = selected_app
+
+    if not app_name:
+        return None
 
     candidates = []
 
     for path_text in discover_application_paths():
         candidate = Path(path_text)
 
-        if candidate.name != f"{app_name}.app":
-            continue
-
-        candidates.append(candidate)
+        if candidate.name == f"{app_name}.app":
+            candidates.append(str(candidate))
 
     if not candidates:
         return None
 
     if requested_parent:
-        for candidate in candidates:
-            label = parent_label(candidate)
+        labels = get_application_labels(candidates)
 
-            if label == requested_parent:
-                return str(candidate)
-
-            if (
-                requested_parent.endswith(" / " + label)
-                and candidate.parent.parent.name
-                in requested_parent
-            ):
-                return str(candidate)
-
+        for path in candidates:
+            if labels[path] == requested_parent:
+                return path
         return None
-
     candidates.sort(
-        key=lambda candidate: (
-            0
-            if str(candidate).startswith("/Applications/")
-            else 1,
-            str(candidate).casefold(),
+        key=lambda path: (
+            0 if path.startswith("/Applications/") else 1,
+            path.casefold(),
         )
     )
 
-    return str(candidates[0])
+    return candidates[0]
 
 def read_schedules():
     """
-    Read saved schedules.
+    Read schedules.json.
 
-    Return None on a read/JSON error so the running blocker can
-    retain its last valid schedules instead of accidentally
-    stopping enforcement because of a temporary file problem.
+    Return None on a read error so the blocker can retain
+    its last valid schedules.
     """
 
     try:
@@ -242,11 +337,11 @@ def read_schedules():
             file=sys.stderr,
             flush=True,
         )
+
         return None
 
     except FileNotFoundError:
-        # No saved schedules file exists.
-        return []
+        return None
 
     except (OSError, json.JSONDecodeError) as error:
         print(
@@ -254,16 +349,40 @@ def read_schedules():
             file=sys.stderr,
             flush=True,
         )
+
         return None
+
+VALID_SCHEDULE_TYPES = {
+    "today",
+    "specific_date",
+    "every_day",
+    "selected_days",
+}
+
+VALID_WEEKDAYS = {
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+}
 
 
 def valid_schedule(schedule):
-    """Check whether a saved schedule has the required fields."""
+    """Validate a schedule before it can block an application."""
 
     if not isinstance(schedule, dict):
         return False
 
-    required = {"app", "start", "end", "type", "days"}
+    required = {
+        "app",
+        "start",
+        "end",
+        "type",
+        "days",
+    }
 
     if not required.issubset(schedule):
         return False
@@ -274,12 +393,7 @@ def valid_schedule(schedule):
     ):
         return False
 
-    if schedule["type"] not in {
-        "today",
-        "specific_date",
-        "every_day",
-        "selected_days",
-    }:
+    if schedule["type"] not in VALID_SCHEDULE_TYPES:
         return False
 
     if not isinstance(schedule["days"], list):
@@ -287,8 +401,12 @@ def valid_schedule(schedule):
 
     if not all(
         isinstance(day, str)
+        and day in VALID_WEEKDAYS
         for day in schedule["days"]
     ):
+        return False
+
+    if schedule.get("enabled", True) not in (True, False):
         return False
 
     try:
@@ -308,14 +426,13 @@ def valid_schedule(schedule):
             "%H:%M",
         ).time()
 
-        # Equal times are not accepted as a full-day schedule.
         if start == end:
             return False
 
-        if schedule["type"] in {
-            "today",
-            "specific_date",
-        }:
+        if schedule["type"] in {"today", "specific_date"}:
+            if not isinstance(schedule.get("date"), str):
+                return False
+
             dt.strptime(
                 schedule["date"],
                 "%d/%m/%Y",
@@ -327,8 +444,31 @@ def valid_schedule(schedule):
     return True
 
 
+def load_valid_schedules():
+    """Load schedules, ignoring invalid entries."""
+
+    saved = read_schedules()
+
+    if saved is None:
+        return None
+
+    valid = [
+        schedule
+        for schedule in saved
+        if valid_schedule(schedule)
+    ]
+
+    if len(valid) != len(saved):
+        print(
+            "WARNING: Some invalid schedules were ignored.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    return valid
+
 def schedules_start_on(schedule, date):
-    """Check whether a schedule is meant to start on this date."""
+    """Check whether a schedule starts on a particular date."""
 
     if schedule.get("enabled", True) is False:
         return False
@@ -352,10 +492,10 @@ def schedules_start_on(schedule, date):
 
 def schedule_is_active(schedule, now):
     """
-    Check whether a schedule is active at the supplied time.
+    Check whether a schedule is active now.
 
-    Overnight schedules can continue past midnight, including
-    when their starting day was yesterday.
+    Supports schedules that cross midnight and schedules
+    that started on the previous day.
     """
 
     if not valid_schedule(schedule):
@@ -397,11 +537,10 @@ def schedule_is_active(schedule, now):
 
 def process_belongs_to_application(process, app_path):
     """
-    Check whether a process executable belongs to the selected
-    application's bundle.
+    Check whether a process executable belongs to an app bundle.
 
-    Matching the executable path also handles many helper
-    processes whose process names differ from the app's name.
+    Do not match by process name alone: unrelated apps and
+    background processes can share names.
     """
 
     bundle_path = os.path.realpath(app_path)
@@ -417,10 +556,6 @@ def process_belongs_to_application(process, app_path):
 
             if executable.startswith(bundle_prefix):
                 return True
-
-        # On macOS, exe may be unavailable. Fall back to the
-        # first command-line argument, which is usually the
-        # executable path.
         command_line = info.get("cmdline") or []
 
         if command_line:
@@ -447,9 +582,9 @@ def process_belongs_to_application(process, app_path):
 
 def terminate_application(selected_app):
     """
-    Terminate running processes belonging to the selected app.
+    Terminate processes belonging to the selected application.
 
-    Returns the number of processes successfully terminated.
+    Returns the number of successfully terminated processes.
     """
 
     app_path = resolve_application_path(selected_app)
@@ -470,7 +605,6 @@ def terminate_application(selected_app):
         )
 
         for process in processes:
-            # Never terminate the background blocker itself.
             if process.pid == os.getpid():
                 continue
 
@@ -499,7 +633,6 @@ def terminate_application(selected_app):
                 terminated += 1
 
             except psutil.NoSuchProcess:
-                # The process may have closed on its own.
                 continue
 
             except psutil.AccessDenied:
@@ -540,33 +673,10 @@ def schedule_key(schedule):
         tuple(schedule.get("days", [])),
     )
 
-
-def load_valid_schedules():
-    """Load schedules and discard invalid entries."""
-
-    saved = read_schedules()
-
-    if saved is None:
-        return None
-
-    valid = [
-        schedule
-        for schedule in saved
-        if valid_schedule(schedule)
-    ]
-
-    if len(valid) != len(saved):
-        print(
-            "WARNING: Some invalid schedules were ignored.",
-            file=sys.stderr,
-            flush=True,
-        )
-
-    return valid
-
-
 def main():
-    if (len(sys.argv) > 1 and sys.argv[1] == "--list-apps"):
+    # Electron uses this command to populate the app dropdown.
+    # It must not start the continuous blocking loop.
+    if len(sys.argv) > 1 and sys.argv[1] == "--list-apps":
         try:
             print(
                 json.dumps(list_applications()),
@@ -581,6 +691,9 @@ def main():
                 flush=True,
             )
             return 1
+
+    if not acquire_single_instance_lock():
+        return 0
 
     schedules = load_valid_schedules()
 
@@ -599,8 +712,6 @@ def main():
         try:
             saved = load_valid_schedules()
 
-            # Keep the last valid list if the file is temporarily
-            # unreadable or contains invalid JSON.
             if saved is not None and saved != schedules:
                 schedules = saved
                 announced_active.clear()
@@ -648,7 +759,7 @@ def main():
                 file=sys.stderr,
                 flush=True,
             )
-            time.sleep(2)
 
-if __name__ == "__main__":
+            time.sleep(2)
+if(__name__ == "__main__"):
     sys.exit(main())

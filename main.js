@@ -1,224 +1,442 @@
+
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { spawn, spawnSync } = require("child_process");
 
-const gotSingleInstanceLock = app.requestSingleInstanceLock();
-
-if (!gotSingleInstanceLock) {
+if (!app.requestSingleInstanceLock()) {
     app.quit();
 } else {
-    let main_window = null;
-    let is_quitting = false;
+    let mainWindow = null;
+    let isQuitting = false;
+    let developmentBlocker = null;
+    let applicationScanProcess = null;
+    let applicationScanId = 0;
 
-    const schedules_file = path.join(
-        app.getPath("home"),
+    const home = app.getPath("home");
+
+    const supportDirectory = path.join(
+        home,
         "Library",
         "Application Support",
-        "python-projects",
+        "python-projects"
+    );
+
+    const schedulesFile = path.join(
+        supportDirectory,
         "schedules.json"
     );
 
-    const applications_file = path.join(
+    const applicationsFile = path.join(
         app.getPath("userData"),
         "applications.json"
     );
 
-    const launch_agents_directory = path.join(
-        app.getPath("home"),
+    const launchAgentsDirectory = path.join(
+        home,
         "Library",
         "LaunchAgents"
     );
 
-    const logs_directory = path.join(
-        app.getPath("home"),
+    const logsDirectory = path.join(
+        home,
         "Library",
         "Logs"
     );
 
-    const launch_agent_label = "com.appblocker.background";
+    const launchAgentLabel = "com.appblocker.background";
 
-    const launch_agent_file = path.join(
-        launch_agents_directory,
-        `${launch_agent_label}.plist`
+    const launchAgentFile = path.join(
+        launchAgentsDirectory,
+        `${launchAgentLabel}.plist`
     );
 
-    app.on("second-instance", () => {
-        if (!main_window || main_window.isDestroyed()) {
-            return;
-        }
+    const backgroundLog = path.join(
+        logsDirectory,
+        "AppBlocker.log"
+    );
 
-        if (main_window.isMinimized()) {
-            main_window.restore();
-        }
+    const backgroundErrorLog = path.join(
+        logsDirectory,
+        "AppBlocker-error.log"
+    );
 
-        main_window.show();
-        main_window.focus();
-    });
+    // Keep the background executable outside the movable app bundle.
+    const stableBlockerPath = path.join(
+        supportDirectory,
+        "app_blocker"
+    );
 
     function sendToWindow(channel, data) {
-        if (main_window && !main_window.isDestroyed()) {
-            main_window.webContents.send(channel, data);
-        }
-    }
-
-    function createWindow() {
-        if (main_window && !main_window.isDestroyed()) {
-            main_window.show();
-            main_window.focus();
-            return;
-        }
-
-        main_window = new BrowserWindow({
-            width: 1000,
-            height: 700,
-            minWidth: 850,
-            minHeight: 600,
-            show: false,
-
-            webPreferences: {
-                preload: path.join(__dirname, "preload.js"),
-                contextIsolation: true,
-                nodeIntegration: false
-            }
-        });
-
-        main_window.loadFile(
-            path.join(__dirname, "index.html")
-        );
-
-        main_window.once("ready-to-show", () => {
-            if (main_window && !main_window.isDestroyed()) {
-                main_window.show();
-            }
-        });
-
-        main_window.webContents.once("did-finish-load", () => {
-            sendSchedulesToWindow();
-
-            // Show a previously saved app list immediately, if available.
-            loadSavedApplications();
-
-            // Refresh the list using the current application discovery logic.
-            loadApplications();
-        });
-
-        main_window.on("close", (event) => {
-            if (!is_quitting) {
-                event.preventDefault();
-                main_window.hide();
-            }
-        });
-
-        main_window.on("closed", () => {
-            main_window = null;
-        });
-    }
-
-    function saveSchedules(schedules) {
-        try {
-            fs.mkdirSync(
-                path.dirname(schedules_file),
-                { recursive: true }
-            );
-
-            fs.writeFileSync(
-                schedules_file,
-                JSON.stringify(schedules, null, 2),
-                "utf8"
-            );
-
-            console.log(
-                `Saved ${schedules.length} schedule(s).`
-            );
-        } catch (error) {
-            console.error("Could not save schedules:", error);
-            sendToWindow(
-                "blocker-error",
-                "Could not save schedules."
-            );
+        if (
+            mainWindow &&
+            !mainWindow.isDestroyed() &&
+            !mainWindow.webContents.isDestroyed()
+        ) {
+            mainWindow.webContents.send(channel, data);
         }
     }
 
     function loadSchedules() {
         try {
-            if (!fs.existsSync(schedules_file)) {
+            if (!fs.existsSync(schedulesFile)) {
                 return [];
             }
 
-            const saved = JSON.parse(
-                fs.readFileSync(schedules_file, "utf8")
+            const schedules = JSON.parse(
+                fs.readFileSync(schedulesFile, "utf8")
             );
 
-            return Array.isArray(saved) ? saved : [];
+            if (!Array.isArray(schedules)) {
+                throw new Error("Schedules must be a JSON list.");
+            }
+
+            return schedules;
         } catch (error) {
             console.error("Could not load schedules:", error);
+
+            sendToWindow(
+                "blocker-error",
+                "Could not load schedules. The saved file was not changed."
+            );
+
             return [];
         }
     }
 
-    
-    function getBlockerPath() {
-        if (app.isPackaged) {
-            const packagedPath = path.join(
-                process.resourcesPath,
-                "app_blocker",
-                "app_blocker"
+    function saveSchedules(schedules) {
+        if (!Array.isArray(schedules)) {
+            sendToWindow(
+                "blocker-error",
+                "Invalid schedule data."
             );
 
-            if (!fs.existsSync(packagedPath)) {
-                throw new Error(
-                    "The Python blocker executable was not found: " +
-                    packagedPath
-                );
+            return false;
+        }
+
+        let temporaryFile;
+
+        try {
+            fs.mkdirSync(supportDirectory, {
+                recursive: true
+            });
+
+            temporaryFile =
+                `${schedulesFile}.${process.pid}.tmp`;
+
+            fs.writeFileSync(
+                temporaryFile,
+                JSON.stringify(schedules, null, 2),
+                "utf8"
+            );
+
+            fs.renameSync(temporaryFile, schedulesFile);
+
+            console.log(
+                `Saved ${schedules.length} schedule(s).`
+            );
+
+            return true;
+        } catch (error) {
+            console.error("Could not save schedules:", error);
+
+            if (temporaryFile) {
+                try {
+                    fs.unlinkSync(temporaryFile);
+                } catch {
+                    // The temporary file may not exist.
+                }
             }
 
-            return {
-                command: packagedPath,
-                args: []
-            };
+            sendToWindow(
+                "blocker-error",
+                "Could not save schedules."
+            );
+
+            return false;
+        }
+    }
+
+    function sendSchedulesToWindow() {
+        sendToWindow("schedules-loaded", loadSchedules());
+    }
+
+    function getPackagedBlockerPath() {
+        const executable = path.join(
+            process.resourcesPath,
+            "app_blocker"
+        );
+
+        if (
+            !fs.existsSync(executable) ||
+            !fs.statSync(executable).isFile()
+        ) {
+            throw new Error(
+                `Blocker executable not found: ${executable}`
+            );
+        }
+
+        return executable;
+    }
+
+    function getDevelopmentBlocker() {
+        const pythonFile = path.join(
+            __dirname,
+            "app_blocker.py"
+        );
+
+        if (!fs.existsSync(pythonFile)) {
+            throw new Error(
+                `Python blocker file not found: ${pythonFile}`
+            );
         }
 
         return {
             command: "python3",
-            args: [
-                path.join(__dirname, "app_blocker.py")
-            ]
+            args: [pythonFile]
         };
     }
 
+    function getBlockerForApp() {
+        if (app.isPackaged) {
+            return {
+                command: getPackagedBlockerPath(),
+                args: []
+            };
+        }
 
-    function getApplicationParentLabel(app_path) {
-        const parent = path.basename(path.dirname(app_path));
+        return getDevelopmentBlocker();
+    }
 
-        if (app_path.startsWith("/System/Applications/")) {
-            if (parent === "Applications") {
-                return "System Applications";
-            }
+    function startDevelopmentBlocker() {
+        if (app.isPackaged) {
+            return;
         }
 
         if (
-            app_path.startsWith(
-                path.join(app.getPath("home"), "Applications") + path.sep
-            ) &&
-            parent === "Applications"
+            developmentBlocker &&
+            developmentBlocker.exitCode === null
         ) {
-            return "User Applications";
+            return;
         }
 
-        return parent;
+        let blocker;
+
+        try {
+            blocker = getDevelopmentBlocker();
+
+            developmentBlocker = spawn(
+                blocker.command,
+                blocker.args,
+                {
+                    cwd: __dirname,
+                    stdio: ["ignore", "pipe", "pipe"]
+                }
+            );
+        } catch (error) {
+            console.error("Could not start blocker:", error);
+
+            sendToWindow(
+                "blocker-error",
+                error.message
+            );
+
+            return;
+        }
+
+        const child = developmentBlocker;
+
+        child.stdout.on("data", (data) => {
+            const message = data.toString().trim();
+
+            if (message) {
+                console.log(`[Blocker] ${message}`);
+                sendToWindow("blocker-status", message);
+            }
+        });
+
+        child.stderr.on("data", (data) => {
+            const message = data.toString().trim();
+
+            if (message) {
+                console.error(`[Blocker] ${message}`);
+                sendToWindow("blocker-error", message);
+            }
+        });
+
+        child.on("error", (error) => {
+            console.error("Blocker failed to start:", error);
+
+            sendToWindow(
+                "blocker-error",
+                "The Python blocker could not start."
+            );
+        });
+
+        child.on("close", (code, signal) => {
+            console.log(
+                `Blocker exited: code=${code}, signal=${signal}`
+            );
+
+            if (developmentBlocker === child) {
+                developmentBlocker = null;
+            }
+
+            if (!isQuitting) {
+                sendToWindow(
+                    "blocker-error",
+                    "The blocker stopped. Reopen the app to start it again."
+                );
+            }
+        });
+    }
+
+    function xmlEscape(value) {
+        return String(value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&apos;");
+    }
+
+    function runLaunchctl(args) {
+        return spawnSync(
+            "/bin/launchctl",
+            args,
+            {
+                encoding: "utf8",
+                timeout: 10000
+            }
+        );
+    }
+
+    function installBackgroundAgent() {
+        if (!app.isPackaged) {
+            return;
+        }
+
+        const domain = `gui/${process.getuid()}`;
+        const service = `${domain}/${launchAgentLabel}`;
+
+        try {
+            fs.mkdirSync(supportDirectory, {
+                recursive: true
+            });
+
+            fs.mkdirSync(launchAgentsDirectory, {
+                recursive: true
+            });
+
+            fs.mkdirSync(logsDirectory, {
+                recursive: true
+            });
+
+            const packagedExecutable = getPackagedBlockerPath();
+
+            // Stop the previous service before replacing its executable.
+            runLaunchctl(["bootout", service]);
+
+            // Copy the executable to a stable location.
+            fs.copyFileSync(
+                packagedExecutable,
+                stableBlockerPath
+            );
+
+            fs.chmodSync(stableBlockerPath, 0o755);
+
+            fs.accessSync(
+                stableBlockerPath,
+                fs.constants.X_OK
+            );
+
+            const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${launchAgentLabel}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>${xmlEscape(stableBlockerPath)}</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>${xmlEscape(backgroundLog)}</string>
+
+    <key>StandardErrorPath</key>
+    <string>${xmlEscape(backgroundErrorLog)}</string>
+</dict>
+</plist>`;
+
+            const temporaryPlist = `${launchAgentFile}.tmp`;
+
+            fs.writeFileSync(
+                temporaryPlist,
+                plist,
+                "utf8"
+            );
+
+            fs.renameSync(
+                temporaryPlist,
+                launchAgentFile
+            );
+
+            const result = runLaunchctl([
+                "bootstrap",
+                domain,
+                launchAgentFile
+            ]);
+
+            if (result.error || result.status !== 0) {
+                throw new Error(
+                    result.error?.message ||
+                    result.stderr ||
+                    "launchctl bootstrap failed."
+                );
+            }
+
+            console.log(
+                "Background blocker installed and started."
+            );
+
+            sendToWindow(
+                "blocker-status",
+                "Background blocker installed and started."
+            );
+        } catch (error) {
+            console.error(
+                "Could not install background blocker:",
+                error
+            );
+
+            sendToWindow(
+                "blocker-error",
+                `Could not start background blocker: ${error.message}`
+            );
+        }
     }
 
     function scanApplicationFolders() {
         const roots = [
             "/Applications",
             "/System/Applications",
-            path.join(app.getPath("home"), "Applications")
+            path.join(home, "Applications")
         ];
 
-        const found_paths = new Set();
+        const found = new Set();
 
-        function walk(folder, depth) {
+        function walk(folder, depth = 0) {
             let entries;
 
             try {
@@ -238,36 +456,33 @@ if (!gotSingleInstanceLock) {
                     continue;
                 }
 
-                const full_path = path.join(
+                const fullPath = path.join(
                     folder,
                     entry.name
                 );
 
                 if (entry.name.endsWith(".app")) {
-                    found_paths.add(full_path);
-                    continue;
-                }
-
-                if (
-                    depth < 5 &&
+                    found.add(fullPath);
+                } else if (
+                    depth < 4 &&
+                    !entry.name.startsWith(".") &&
                     entry.name !== "Contents" &&
-                    entry.name !== "Frameworks" &&
-                    !entry.name.startsWith(".")
+                    entry.name !== "Frameworks"
                 ) {
-                    walk(full_path, depth + 1);
+                    walk(fullPath, depth + 1);
                 }
             }
         }
 
         for (const root of roots) {
-            walk(root, 0);
+            walk(root);
         }
 
         const grouped = new Map();
 
-        for (const app_path of found_paths) {
-            const name = path.basename(app_path, ".app");
-            const parent = getApplicationParentLabel(app_path);
+        for (const appPath of found) {
+            const name = path.basename(appPath, ".app");
+            const parent = path.basename(path.dirname(appPath));
 
             if (!grouped.has(name)) {
                 grouped.set(name, []);
@@ -276,13 +491,13 @@ if (!gotSingleInstanceLock) {
             grouped.get(name).push({
                 name,
                 parent,
-                path: app_path
+                path: appPath
             });
         }
 
         const result = [];
 
-        for (const [name, entries] of grouped.entries()) {
+        for (const [name, entries] of grouped) {
             entries.sort((a, b) =>
                 a.path.localeCompare(b.path)
             );
@@ -292,33 +507,16 @@ if (!gotSingleInstanceLock) {
                 continue;
             }
 
-            const used_labels = new Set();
-
             for (const entry of entries) {
-                let label = entry.parent;
-
-                if (used_labels.has(label)) {
-                    label = path.basename(
-                        path.dirname(
-                            path.dirname(entry.path)
-                        )
-                    ) + " / " + label;
-                }
-
-                used_labels.add(label);
-                result.push([name, label]);
+                result.push([name, entry.parent]);
             }
         }
 
         return result.sort((a, b) => {
-            const name_a = Array.isArray(a) ? a[0] : a;
-            const name_b = Array.isArray(b) ? b[0] : b;
+            const nameA = Array.isArray(a) ? a[0] : a;
+            const nameB = Array.isArray(b) ? b[0] : b;
 
-            return name_a.localeCompare(
-                name_b,
-                undefined,
-                { sensitivity: "base" }
-            );
+            return nameA.localeCompare(nameB);
         });
     }
 
@@ -329,18 +527,23 @@ if (!gotSingleInstanceLock) {
 
         try {
             fs.mkdirSync(
-                path.dirname(applications_file),
+                path.dirname(applicationsFile),
                 { recursive: true }
             );
 
+            const temporaryFile =
+                `${applicationsFile}.${process.pid}.tmp`;
+
             fs.writeFileSync(
-                applications_file,
+                temporaryFile,
                 JSON.stringify(apps, null, 2),
                 "utf8"
             );
+
+            fs.renameSync(temporaryFile, applicationsFile);
         } catch (error) {
             console.error(
-                "Could not cache applications:",
+                "Could not save application cache:",
                 error
             );
         }
@@ -348,34 +551,38 @@ if (!gotSingleInstanceLock) {
 
     function loadSavedApplications() {
         try {
-            if (!fs.existsSync(applications_file)) {
-                return;
-            }
-
-            const cached = JSON.parse(
-                fs.readFileSync(applications_file, "utf8")
+            const apps = JSON.parse(
+                fs.readFileSync(applicationsFile, "utf8")
             );
 
-            // An empty cache must not prevent a fresh scan.
-            if (Array.isArray(cached) && cached.length > 0) {
-                sendToWindow("apps-found", cached);
+            if (Array.isArray(apps) && apps.length > 0) {
+                sendToWindow("apps-found", apps);
             }
-        } catch (error) {
-            console.error(
-                "Could not load saved applications:",
-                error
-            );
+        } catch {
+            // No saved application cache is available yet.
         }
     }
 
     function loadApplications() {
+        const scanId = ++applicationScanId;
+
+        if (
+            applicationScanProcess &&
+            applicationScanProcess.exitCode === null
+        ) {
+            applicationScanProcess.kill();
+        }
+
         let blocker;
 
         try {
-            blocker = getBlockerPath();
+            blocker = getBlockerForApp();
         } catch (error) {
-            console.error(error.message);
-            useApplicationFolderFallback();
+            console.error(error);
+
+            const apps = scanApplicationFolders();
+            saveApplicationsCache(apps);
+            sendToWindow("apps-found", apps);
             return;
         }
 
@@ -386,52 +593,51 @@ if (!gotSingleInstanceLock) {
                 blocker.command,
                 [...blocker.args, "--list-apps"],
                 {
+                    cwd: __dirname,
                     stdio: ["ignore", "pipe", "pipe"]
                 }
             );
         } catch (error) {
-            console.error(
-                "Could not start application discovery:",
-                error
-            );
+            console.error("Could not scan applications:", error);
 
-            useApplicationFolderFallback();
+            const apps = scanApplicationFolders();
+            saveApplicationsCache(apps);
+            sendToWindow("apps-found", apps);
             return;
         }
 
+        applicationScanProcess = child;
+
         let output = "";
-        let error_output = "";
-        let fallback_used = false;
-
-        function useFallbackOnce() {
-            if (fallback_used) {
-                return;
-            }
-
-            fallback_used = true;
-            useApplicationFolderFallback();
-        }
+        let errorOutput = "";
 
         child.stdout.on("data", (data) => {
             output += data.toString();
         });
 
         child.stderr.on("data", (data) => {
-            error_output += data.toString();
+            errorOutput += data.toString();
         });
 
         child.on("error", (error) => {
-            console.error(
-                "Application discovery failed:",
-                error
-            );
+            if (scanId !== applicationScanId) {
+                return;
+            }
 
-            useFallbackOnce();
+            console.error("Application scan failed:", error);
+
+            const apps = scanApplicationFolders();
+            saveApplicationsCache(apps);
+            sendToWindow("apps-found", apps);
         });
 
         child.on("close", (code) => {
-            if (fallback_used) {
+            if (scanId !== applicationScanId) {
                 return;
+            }
+
+            if (applicationScanProcess === child) {
+                applicationScanProcess = null;
             }
 
             let apps = [];
@@ -439,218 +645,76 @@ if (!gotSingleInstanceLock) {
             try {
                 if (code !== 0) {
                     throw new Error(
-                        error_output ||
-                        `Application discovery exited with code ${code}.`
+                        errorOutput ||
+                        `Application scan exited with code ${code}.`
                     );
                 }
 
                 apps = JSON.parse(output);
 
                 if (!Array.isArray(apps)) {
-                    throw new Error(
-                        "Application discovery returned invalid data."
-                    );
+                    throw new Error("Invalid application list.");
                 }
             } catch (error) {
-                console.error(
-                    "Could not read the application list:",
-                    error
-                );
+                console.error(error);
             }
 
             if (apps.length === 0) {
                 apps = scanApplicationFolders();
             }
 
-            if (apps.length > 0) {
-                saveApplicationsCache(apps);
-                sendToWindow("apps-found", apps);
-                return;
-            }
-
-            try {
-                const cached = JSON.parse(
-                    fs.readFileSync(applications_file, "utf8")
-                );
-
-                if (Array.isArray(cached) && cached.length > 0) {
-                    sendToWindow("apps-found", cached);
-                    return;
-                }
-            } catch {
-
-            }
-
-            sendToWindow("apps-found", []);
-            sendToWindow(
-                "blocker-error",
-                "No applications were found. Check that your Applications folders are accessible."
-            );
+            saveApplicationsCache(apps);
+            sendToWindow("apps-found", apps);
         });
     }
 
-    function useApplicationFolderFallback() {
-        const apps = scanApplicationFolders();
-
-        if (apps.length > 0) {
-            saveApplicationsCache(apps);
-            sendToWindow("apps-found", apps);
+    function createWindow() {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.show();
+            mainWindow.focus();
             return;
         }
 
-        try {
-            const cached = JSON.parse(
-                fs.readFileSync(applications_file, "utf8")
-            );
+        mainWindow = new BrowserWindow({
+            width: 1000,
+            height: 700,
+            minWidth: 850,
+            minHeight: 600,
+            show: false,
 
-            if (Array.isArray(cached) && cached.length > 0) {
-                sendToWindow("apps-found", cached);
-                return;
+            webPreferences: {
+                preload: path.join(__dirname, "preload.js"),
+                contextIsolation: true,
+                nodeIntegration: false
             }
-        } catch {
-            // No cache available.
-        }
+        });
 
-        sendToWindow("apps-found", []);
-        sendToWindow(
-            "blocker-error",
-            "Application discovery failed. No cached application list is available."
-        );
-    }
-
-    function xmlEscape(value) {
-        return String(value)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&apos;");
-    }
-
-    function installBackgroundAgent(){
-        if (!app.isPackaged) {
-            console.log(
-                "Development mode: leaving the installed background service unchanged."
-            );
-            return;
-        }
-
-        const blocker_path = path.join(
-            process.resourcesPath,
-            "app_blocker",
-            "app_blocker"
+        mainWindow.loadFile(
+            path.join(__dirname, "index.html")
         );
 
-        if (!fs.existsSync(blocker_path)) {
-            console.error(
-                "Background blocker executable is missing:",
-                blocker_path
-            );
-            return;
-        }
-
-        try {
-            fs.mkdirSync(
-                launch_agents_directory,
-                { recursive: true }
-            );
-
-            fs.mkdirSync(
-                logs_directory,
-                { recursive: true }
-            );
-
-            const arguments_xml = `
-        <array>
-            <string>${xmlEscape(blocker_path)}</string>
-        </array>`;
-
-            const plist_contents = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${launch_agent_label}</string>
-    <key>ProgramArguments</key>
-    ${arguments_xml}
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>ProcessType</key>
-    <string>Background</string>
-    <key>StandardOutPath</key>
-    <string>${xmlEscape(path.join(logs_directory, "AppBlocker.log"))}</string>
-    <key>StandardErrorPath</key>
-    <string>${xmlEscape(path.join(logs_directory, "AppBlocker-error.log"))}</string>
-</dict>
-</plist>`;
-
-            fs.writeFileSync(
-                launch_agent_file,
-                plist_contents,
-                "utf8"
-            );
-
-            const domain = `gui/${process.getuid()}`;
-
-            // It is okay if the service was not loaded yet.
-            spawnSync(
-                "/bin/launchctl",
-                ["bootout", `${domain}/${launch_agent_label}`],
-                { stdio: "ignore" }
-            );
-
-            const result = spawnSync(
-                "/bin/launchctl",
-                [
-                    "bootstrap",
-                    domain,
-                    launch_agent_file
-                ],
-                { encoding: "utf8" }
-            );
-
-            if (result.error || result.status !== 0) {
-                console.error(
-                    "Could not start the background service:",
-                    result.error || result.stderr
-                );
-
-                const retry = spawnSync(
-                    "/bin/launchctl",
-                    [
-                        "kickstart",
-                        "-k",
-                        `${domain}/${launch_agent_label}`
-                    ],
-                    { encoding: "utf8" }
-                );
-
-                if (retry.error || retry.status !== 0) {
-                    console.error(
-                        "Could not restart the background service:",
-                        retry.error || retry.stderr
-                    );
-                }
-            } else {
-                console.log(
-                    "Background service installed and started."
-                );
+        mainWindow.once("ready-to-show", () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.show();
             }
-        } catch (error) {
-            console.error(
-                "Could not configure the background service:",
-                error
-            );
-        }
-    }
+        });
 
-    function sendSchedulesToWindow() {
-        sendToWindow(
-            "schedules-loaded",
-            loadSchedules()
-        );
+        mainWindow.webContents.once("did-finish-load", () => {
+            sendSchedulesToWindow();
+            loadSavedApplications();
+            loadApplications();
+        });
+
+        mainWindow.on("close", (event) => {
+            if (!isQuitting) {
+                event.preventDefault();
+                mainWindow.hide();
+            }
+        });
+
+        mainWindow.on("closed", () => {
+            mainWindow = null;
+        });
     }
 
     ipcMain.on("load-schedules", () => {
@@ -659,33 +723,77 @@ if (!gotSingleInstanceLock) {
 
     ipcMain.on("block-app", (_event, data) => {
         if (!data || !Array.isArray(data.schedules)) {
-            console.error("Received invalid schedule data.");
+            sendToWindow(
+                "blocker-error",
+                "Invalid schedule data was received."
+            );
             return;
         }
 
-        saveSchedules(data.schedules);
-        sendSchedulesToWindow();
+        if (saveSchedules(data.schedules)) {
+            sendSchedulesToWindow();
+
+            console.log(
+                "Schedules saved for the background blocker."
+            );
+        }
     });
 
     app.whenReady().then(() => {
-        installBackgroundAgent();
         createWindow();
+
+        if (app.isPackaged) {
+            installBackgroundAgent();
+        } else {
+            startDevelopmentBlocker();
+        }
     });
 
-    app.on("before-quit", () => {
-        is_quitting = true;
-    });
+    app.on("second-instance", () => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+            return;
+        }
 
-    app.on("window-all-closed", () => {
-        // Keep the app running in the background on macOS.
+        if (mainWindow.isMinimized()) {
+            mainWindow.restore();
+        }
+
+        mainWindow.show();
+        mainWindow.focus();
     });
 
     app.on("activate", () => {
-        if (main_window && !main_window.isDestroyed()) {
-            main_window.show();
-            main_window.focus();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.show();
+            mainWindow.focus();
         } else {
             createWindow();
         }
+    });
+
+    app.on("before-quit", () => {
+        isQuitting = true;
+
+        if (
+            applicationScanProcess &&
+            applicationScanProcess.exitCode === null
+        ) {
+            applicationScanProcess.kill();
+            applicationScanProcess = null;
+        }
+
+        // Do not stop the packaged LaunchAgent here.
+        // It must keep blocking after the window closes.
+        if (
+            !app.isPackaged &&
+            developmentBlocker &&
+            developmentBlocker.exitCode === null
+        ) {
+            developmentBlocker.kill();
+            developmentBlocker = null;
+        }
+    });
+
+    app.on("window-all-closed", () => {
     });
 }
