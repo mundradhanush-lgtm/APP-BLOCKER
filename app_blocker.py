@@ -6,6 +6,7 @@ import os
 import psutil
 import sys
 import time
+from functools import lru_cache
 
 if(sys.platform != "darwin"):
     print(f"ERROR: Unsupported operating system: {sys.platform}", file=sys.stderr, flush=True,)
@@ -221,9 +222,10 @@ def list_applications():
 
         for path in paths:
             result.append([name, labels[path]])
-
+    clear_application_path_cache()
     return result
 
+@lru_cache(maxsize=128)
 def resolve_application_path(selected_app):
     """Resolve an Electron selection to an actual .app bundle."""
 
@@ -270,6 +272,9 @@ def resolve_application_path(selected_app):
     candidates.sort(key=lambda path: (0 if path.startswith("/Applications/") else 1, path.casefold()))
 
     return candidates[0]
+
+def clear_application_path_cache():
+    resolve_application_path.cache_clear()
 
 def read_schedules():
     """
@@ -388,6 +393,8 @@ def schedules_start_on(schedule, date):
 
     return False
 
+
+
 def schedule_is_active(schedule, now):
     """
     Check whether a schedule is active now.
@@ -403,7 +410,6 @@ def schedule_is_active(schedule, now):
         return False
 
     start = dt.strptime(schedule["start"], "%H:%M").time()
-
     end = dt.strptime(schedule["end"], "%H:%M").time()
 
     today = now.date()
@@ -511,6 +517,18 @@ def schedule_key(schedule):
 
     return (schedule.get("id"), schedule["app"], schedule["start"], schedule["end"], schedule["type"], schedule.get("date"), tuple(schedule.get("days", [])))
 
+def get_schedule_file_signature():
+    """Return a signature that changes when the schedule file changes."""
+
+    try:
+        file_info = SCHEDULES_FILE.stat()
+        return (file_info.st_mtime_ns, file_info.st_size)
+
+    except FileNotFoundError:
+        return None
+
+    except OSError:
+        return None
 
 def main():
     if(len(sys.argv) > 1 and sys.argv[1] == "--list-apps"):
@@ -527,22 +545,31 @@ def main():
 
     schedules = load_valid_schedules()
 
-    if(schedules is None):
+    if schedules is None:
         schedules = []
 
-    print(f"BLOCKER READY: Monitoring {len(schedules)} "f"schedule(s).", flush=True)
+    print(f"BLOCKER READY: Monitoring {len(schedules)} schedule(s).", flush=True)
 
     announced_active = set()
 
+    last_schedule_signature = get_schedule_file_signature()
+
     while True:
         try:
-            saved = load_valid_schedules()
+            
+            current_signature = get_schedule_file_signature()
 
-            if(saved is not None and saved != schedules):
-                schedules = saved
-                announced_active.clear()
+            if(current_signature != last_schedule_signature):
+                saved = load_valid_schedules()
 
-                print(f"SCHEDULES UPDATED: Monitoring "f"{len(schedules)} schedule(s).", flush=True,)
+                if(saved is not None):
+                    last_schedule_signature = current_signature
+
+                    if(saved != schedules):
+                        schedules = saved
+                        announced_active.clear()
+
+                        print(f"SCHEDULES UPDATED: Monitoring {len(schedules)} schedule(s).", flush=True)
 
             now = dt.now()
             active_keys = set()
@@ -555,9 +582,9 @@ def main():
                 active_keys.add(key)
 
                 if(key not in announced_active):
-                    print(f"ACTIVE SCHEDULE: {schedule['app']} "f"from {schedule['start']} "f"until {schedule['end']}.", flush=True,)
-
+                    print(f"ACTIVE SCHEDULE: {schedule['app']} "f"from {schedule['start']} until {schedule['end']}.", flush=True)
                 terminate_application(schedule["app"])
+            announced_active = active_keys
             time.sleep(POLL_INTERVAL)
 
         except KeyboardInterrupt:
