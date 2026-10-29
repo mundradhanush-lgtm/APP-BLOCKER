@@ -8,15 +8,15 @@ So, this an application that only runs only on macOS which blocks apps according
 So, there are many features of App Blocker and they are:-
 
 - It shows all the downloaded applications of your mac in the dropdown from where you can select the app which you want to block.
-![picture showing a dropdown of all the downloaded applications in your mac that can be blocked](Screenshot/DROPDOWN_OF_APPS.jpg) So, this is the dropdown of all the downloaded applications on your mac that can be blocked.
+![picture showing a dropdown of all the downloaded applications in your mac that can be blocked](DROPDOWN_OF_APPS.jpg) So, this is the dropdown of all the downloaded applications on your mac that can be blocked.
 - You can set time according to you. The maximum limit of the time schedule is 23 hours and 59 minutes, so you cannot block the app for more than this time period.
-![a picture showing the placeholders for start and end time](Screenshot/TIME_PLACEHOLDERS.jpg)
+![a picture showing the placeholders for start and end time](TIME_PLACEHOLDERS.jpg)
 - You can select the type of schedule also. There would be a dropdown where you have to just click and you would see options like ***Every day***, ***Today only***, ***Select Date***, and ***Select Day***
-![picture showing the dropdown of schedule types](Screenshot/DROPDOWN_OF_SCHEDULE_TYPE.jpg)
+![picture showing the dropdown of schedule types](DROPDOWN_OF_SCHEDULE_TYPE.jpg)
 - The coolest feature is that you can add multiple schedules for a single application, but the schedules should not overlap the previous schedules of the same app.
-![adding multiple schedules feature screenshot](Screenshot/ADD_ANOTHER_SCHEDULE_BUTTON.jpg) So, this is the button from where you can add another scedule for the same app.
-![the interface after clicking on the *Add another schedule* button](Screenshot/INTERFACE_AFTER_ADD_ANOTHER_SCHEDULE.jpg) So, in this image, you can see the interface which would be shown just after you click on *Add another schedule* button.
-![picture of the screen which comes after you have completed the details of the other schedules also and clicked on the *Save* button](Screenshot/INTERFACE_AFTER_MULTIPLE_SCHEDULES_ARE_SAVED.jpg) SO, in this image, you can see the interface that appears when you have completed the details of the other schedules as well and click on save.
+![adding multiple schedules feature screenshot](ADD_ANOTHER_SCHEDULE_BUTTON.jpg) So, this is the button from where you can add another scedule for the same app.
+![the interface after clicking on the *Add another schedule* button](INTERFACE_AFTER_ADD_ANOTHER_SCHEDULE.jpg) So, in this image, you can see the interface which would be shown just after you click on *Add another schedule* button.
+![picture of the screen which comes after you have completed the details of the other schedules also and clicked on the *Save* button](INTERFACE_AFTER_MULTIPLE_SCHEDULES_ARE_SAVED.jpg) SO, in this image, you can see the interface that appears when you have completed the details of the other schedules as well and click on save.
 - Another feature is that it can even run while you have your App Blocker closed or you have just restarted the system. However one condition is this that if you have a schedule that is blocking an app currently and you restrt your system or turn on your system after shutting down, then the App Blocker would take around 5-10 minutes to block the app.
 
 ## Installation
