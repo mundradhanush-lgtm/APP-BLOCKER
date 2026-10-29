@@ -8,7 +8,11 @@ So, this an application that only runs only on macOS which blocks apps according
 So, there are many features of App Blocker and they are:-
 
 - It shows all the downloaded applications of your mac in the dropdown from where you can select the app which you want to block.
-![picture showing a dropdown of all the downloaded applications in your mac that can be blocked](DROPDOWN_OF_APPS.jpg) So, this is the dropdown of all the downloaded applications on your mac that can be blocked.
+
+![picture showing a dropdown of all the downloaded applications in your mac that can be blocked](DROPDOWN_OF_APPS.jpg) 
+
+So, this is the dropdown of all the downloaded applications on your mac that can be blocked.
+
 - You can set time according to you. The maximum limit of the time schedule is 23 hours and 59 minutes, so you cannot block the app for more than this time period.
 
 ![a picture showing the placeholders for start and end time](TIME_PLACEHOLDERS.jpg)
