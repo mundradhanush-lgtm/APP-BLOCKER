@@ -39,7 +39,19 @@ So, in this image, you can see the interface that appears when you have complete
 
 ## Installation
 
-Downloading and Installing App Blocker is very simple. Basically you have to click [here](https://github.com/mundradhanush-lgtm/APP-BLOCKER/releases/download/v1.0.0/App.Blocker-1.0.0-arm64.dmg) to download the .dmg file of app blocker and as you're on mac, you can just drag it to the applications folder to install it and turn it into a real application and your App Blocker is ready to be used!
+## Installation
+
+Download the DMG that matches your Mac:
+
+- [Apple silicon (arm64)](https://github.com/mundradhanush-lgtm/APP-BLOCKER/releases/download/v1.0.0/App.Blocker-1.0.0-arm64.dmg)
+- [Intel (x64)](https://github.com/mundradhanush-lgtm/APP-BLOCKER/releases/download/v1.0.0/App.Blocker-1.0.0-x64.dmg)
+
+Open the downloaded DMG and drag **App Blocker** into your Applications folder.
+
+This is an unsigned test build. If macOS says **“App Blocker” is damaged and can’t be opened**, and you trust this build, open Terminal and run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/App Blocker.app"
 
 ## How To Use
 
