@@ -39,8 +39,6 @@ So, in this image, you can see the interface that appears when you have complete
 
 ## Installation
 
-## Installation
-
 Download the DMG that matches your Mac:
 
 - [Apple silicon (arm64)](https://github.com/mundradhanush-lgtm/APP-BLOCKER/releases/download/v1.0.0/App.Blocker-1.0.0-arm64.dmg)
@@ -52,6 +50,7 @@ This is an unsigned test build. If macOS says **“App Blocker” is damaged and
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/App Blocker.app"
+```
 
 ## How To Use
 
